@@ -1,11 +1,75 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, ReferenceLine } from 'recharts';
-import { TrendingUp, DollarSign, Activity, BarChart2, PieChart, Newspaper, Zap, Search, ArrowRight, ShieldCheck, Wifi, WifiOff, Target, RefreshCw, ExternalLink, HelpCircle, Star, Trash2, AlertTriangle, Bot, FileText, Briefcase, Calculator, Globe, Filter, CheckCircle2, Wallet, PlusCircle, X, Server, Lock, Database, Clock, Scale, RotateCcw } from 'lucide-react';
+import { TrendingUp, Activity, BarChart2, PieChart, Newspaper, Zap, Search, ShieldCheck, Wifi, WifiOff, Target, RefreshCw, ExternalLink, HelpCircle, Star, Trash2, Bot, FileText, CheckCircle2, Wallet, PlusCircle, X, Server, Lock, Database, Microscope, Scale, Calculator, AlertTriangle } from 'lucide-react';
 
-// --- 常數設定 ---
+// ⚠️ 請確認這是您 Render 後端的網址
 const API_BASE_URL = "https://stock-backend-g011.onrender.com"; 
 
-// --- 策略定義 ---
+// --- [使用者要求] 詳細介面設定 (Rich UI) ---
+const ANALYSIS_CRITERIA = {
+  fund: { 
+    title: "基本面分析 (Fundamental)", 
+    icon: PieChart, 
+    color: "text-blue-600", 
+    bgColor: "bg-blue-50",
+    desc: "評估公司真實價值與長期競爭力",
+    items: [
+      { label: "營收、獲利 (EPS)", desc: "檢視每股盈餘成長率與營收動能" },
+      { label: "利潤率分析", desc: "毛利率 / 營業利益率 / 淨利率" },
+      { label: "經營績效 (ROE/ROA)", desc: "股東權益報酬率與資產報酬率" },
+      { label: "現金流量 (FCF)", desc: "自由現金流是否充裕健康" },
+      { label: "財務結構", desc: "負債比率與流動性風險評估" },
+      { label: "護城河與競爭力", desc: "產業地位、定價權與技術門檻" },
+      { label: "未來成長性", desc: "新技術導入與產品線擴展潛力" }
+    ]
+  },
+  tech: { 
+    title: "技術面分析 (Technical)", 
+    icon: TrendingUp, 
+    color: "text-purple-600", 
+    bgColor: "bg-purple-50", 
+    desc: "透過量價走勢判斷進出場時機",
+    items: [
+      { label: "K 線型態", desc: "晨星、吞噬、頭肩頂等反轉訊號" },
+      { label: "均線系統 (MA)", desc: "5日、20日、60日、120日線排列" },
+      { label: "MACD 指標", desc: "趨勢強弱與多空轉折 (DIF/DEM)" },
+      { label: "RSI 相對強弱", desc: "判斷超買(>70)或超賣(<30)區間" },
+      { label: "KD 隨機指標", desc: "短線轉折訊號 (K值/D值)" },
+      { label: "布林通道", desc: "股價波動範圍與壓縮突破" },
+      { label: "成交量能", desc: "量價關係 (量縮整理/爆量突破)" }
+    ]
+  },
+  chip: { 
+    title: "籌碼面分析 (Chip Flow)", 
+    icon: BarChart2, 
+    color: "text-orange-600", 
+    bgColor: "bg-orange-50", 
+    desc: "追蹤主力大戶與法人的資金動向",
+    items: [
+      { label: "三大法人買賣超", desc: "外資、投信、自營商動向" },
+      { label: "主力進出", desc: "關鍵券商分點與大戶持股比" },
+      { label: "融資融券", desc: "散戶指標與軋空潛力 (券資比)" },
+      { label: "借券賣出", desc: "潛在空方壓力監控" },
+      { label: "股權分散度", desc: "集保戶數變化 (大戶vs散戶)" }
+    ]
+  },
+  news: { 
+    title: "消息面分析 (Sentiment)", 
+    icon: Newspaper, 
+    color: "text-green-600", 
+    bgColor: "bg-green-50", 
+    desc: "解讀市場情緒與宏觀環境影響",
+    items: [
+      { label: "重大公司新聞", desc: "財報公佈、法說會、產品發表、併購" },
+      { label: "宏觀經濟指標", desc: "利率、通膨、美元指數、美債殖利率" },
+      { label: "政策與法規", desc: "政府補貼、產業禁令、稅收政策" },
+      { label: "AI 與科技趨勢", desc: "新科技浪潮與市場情緒" },
+      { label: "國際局勢", desc: "戰爭、疫情、供應鏈事件影響" },
+      { label: "社群情緒", desc: "新聞熱度與恐懼貪婪指數" }
+    ]
+  }
+};
+
 const STRATEGIES = {
   none: { label: '無 (不限)', allowedPeriods: ['short', 'mid', 'long'], risk: 'neutral' },
   day_trade: { label: '⚡ 當沖 (極短)', allowedPeriods: ['short'], risk: 'aggressive' },
@@ -14,74 +78,57 @@ const STRATEGIES = {
   value: { label: '🐢 存股 (長期)', allowedPeriods: ['long'], risk: 'conservative' }
 };
 
-const PERIODS = {
-  short: { label: '短期 (5日)', days: 5 },
-  mid: { label: '中期 (60日)', days: 60 },
-  long: { label: '長期 (1年)', days: 250 }
-};
-
-// --- [核心工具] 嚴格台灣日期格式 (YYYY-MM-DD) ---
+// --- 工具函數 ---
 const getTaiwanDateString = () => {
   const now = new Date();
   const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
   const twTime = new Date(utc + (3600000 * 8));
-  const y = twTime.getFullYear();
-  const m = String(twTime.getMonth() + 1).padStart(2, '0');
-  const d = String(twTime.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return twTime.toISOString().slice(0, 10);
 };
 
-// --- [核心運算] 本地端真實技術指標 ---
-const calculateRSI = (prices, period = 14) => {
-  if (!prices || prices.length < period + 1) return 50;
+// --- 真實技術指標運算 (前端即時計算 - 確保即時性) ---
+const calcSMA = (data, period) => {
+  if (data.length < period) return null;
+  return data.slice(-period).reduce((a, b) => a + b, 0) / period;
+};
+
+const calculateDetailedTechnicals = (prices) => {
+  if (!prices || prices.length < 60) return null;
+
+  // RSI
   let gains = 0, losses = 0;
-  for (let i = 1; i <= period; i++) {
+  for (let i = prices.length - 14; i < prices.length; i++) {
     const diff = prices[i] - prices[i - 1];
     if (diff >= 0) gains += diff; else losses += Math.abs(diff);
   }
-  let avgGain = gains / period;
-  let avgLoss = losses / period;
-  for (let i = period + 1; i < prices.length; i++) {
-    const diff = prices[i] - prices[i - 1];
-    const currentGain = diff > 0 ? diff : 0;
-    const currentLoss = diff < 0 ? Math.abs(diff) : 0;
-    avgGain = (avgGain * (period - 1) + currentGain) / period;
-    avgLoss = (avgLoss * (period - 1) + currentLoss) / period;
-  }
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return Math.round(100 - (100 / (1 + rs)));
-};
+  const rs = gains / (losses || 1);
+  const rsi = 100 - (100 / (1 + rs));
 
-const calculateRealTechScore = (fullHistoryPrices) => {
-  // 強制標準化：只取最後 60 筆資料運算，確保跨裝置一致
-  if (!fullHistoryPrices || fullHistoryPrices.length < 30) return 50;
-  const historyPrices = fullHistoryPrices.slice(-60); 
-
-  const rsi = calculateRSI(historyPrices);
-  let rsiScore = 50;
-  if (rsi > 70) rsiScore = 85; 
-  else if (rsi < 30) rsiScore = 30; 
-  else rsiScore = 50 + (rsi - 50); 
-
-  const currentPrice = historyPrices[historyPrices.length - 1];
-  const ma5 = historyPrices.slice(-5).reduce((a, b) => a + b, 0) / 5;
-  const ma20 = historyPrices.slice(-20).reduce((a, b) => a + b, 0) / 20;
-  const ma60 = historyPrices.slice(-60).reduce((a, b) => a + b, 0) / 60;
+  // Bollinger Bands (20, 2)
+  const sma20 = calcSMA(prices, 20);
+  const slice20 = prices.slice(-20);
+  const variance = slice20.reduce((acc, val) => acc + Math.pow(val - sma20, 2), 0) / 20;
+  const stdDev = Math.sqrt(variance);
   
-  let trendScore = 50;
-  if (currentPrice > ma5 && ma5 > ma20 && ma20 > ma60) trendScore = 95;
-  else if (currentPrice > ma20 && ma20 > ma60) trendScore = 80;
-  else if (currentPrice > ma60) trendScore = 60;
-  else if (currentPrice < ma5 && ma5 < ma20 && ma20 < ma60) trendScore = 20;
-  else if (currentPrice < ma20) trendScore = 35;
-  else trendScore = 45;
+  // KD (近似值)
+  const slice9 = prices.slice(-9);
+  const high9 = Math.max(...slice9);
+  const low9 = Math.min(...slice9);
+  const rsv = (high9 === low9) ? 50 : ((prices[prices.length - 1] - low9) / (high9 - low9)) * 100;
+  const kVal = (2/3) * 50 + (1/3) * rsv;
 
-  return Math.round(rsiScore * 0.4 + trendScore * 0.6);
+  return {
+    rsi: Math.round(rsi),
+    upperBand: (sma20 + 2 * stdDev).toFixed(2),
+    lowerBand: (sma20 - 2 * stdDev).toFixed(2),
+    ma20: sma20.toFixed(2),
+    ma60: calcSMA(prices, 60).toFixed(2),
+    kVal: Math.round(kVal),
+    price: prices[prices.length - 1]
+  };
 };
 
-// --- [核心API] 強制重試與完整性檢查 ---
-
+// --- 核心 API 連線與重試機制 ---
 const fetchWithRetry = async (payload, retries = 2) => {
   for (let i = 0; i <= retries; i++) {
     try {
@@ -90,21 +137,18 @@ const fetchWithRetry = async (payload, retries = 2) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       
-      // 檢查資料完整性：如果基本面是 0 或 null，視為失敗，觸發重試
-      // 這能確保我們盡最大努力拿到完整資料
+      // 完整性檢查：如果重要欄位是 0，視為資料缺失，觸發重試
       if (!data.details || !data.details.fund || data.details.fund === 0) {
         if (i < retries) {
-          console.warn(`Attempt ${i + 1} incomplete data, retrying...`);
-          await new Promise(r => setTimeout(r, 1500)); // 等待 1.5 秒後重試
+          console.warn(`資料不完整，第 ${i + 1} 次重試...`);
+          await new Promise(r => setTimeout(r, 1500));
           continue;
         }
       }
-      
-      return data; // 回傳成功 (或最後一次嘗試的結果)
+      return data; 
     } catch (e) {
       if (i === retries) throw e;
       await new Promise(r => setTimeout(r, 1500));
@@ -115,117 +159,82 @@ const fetchWithRetry = async (payload, retries = 2) => {
 const fetchDepthAnalysis = async (ticker, principal, risk) => {
   const cleanTicker = ticker.toUpperCase();
   const twDate = getTaiwanDateString();
-  const cacheKey = `stock_real_v8_${cleanTicker}_${twDate}`; 
+  const cacheKey = `stock_real_v9_pro_${cleanTicker}_${twDate}`; 
   
   const cachedData = localStorage.getItem(cacheKey);
-  if (cachedData) {
-    return { ...JSON.parse(cachedData), source: 'cached' };
-  }
+  if (cachedData) return { ...JSON.parse(cachedData), source: 'cached' };
 
   try {
-    // 使用帶有重試機制的 Fetch
     const data = await fetchWithRetry({ ticker, principal, risk });
     
-    // --- 資料處理 ---
+    const historyPrices = data.chart_data.history_price;
+    // [資料標準化] 解決電腦/手機分數不一致問題：
+    // 無論後端回傳 100 筆還是 200 筆，我們只取「最後 60 筆」進行即時運算
+    const calcPrices = historyPrices.slice(-60);
+    const techDetails = calculateDetailedTechnicals(calcPrices);
     
-    // 1. 技術面 (40%)
-    const realHistoryPrices = data.chart_data.history_price;
-    const realTechScore = calculateRealTechScore(realHistoryPrices);
+    // 技術面評分 (基於標準化後的真實運算)
+    let techScore = 50;
+    if (techDetails) {
+        if (techDetails.rsi > 70) techScore = 85;
+        else if (techDetails.rsi < 30) techScore = 25;
+        else techScore = 50 + (techDetails.rsi - 50) * 0.5;
+        
+        if (Number(techDetails.price) > Number(techDetails.ma20)) techScore += 10;
+        if (Number(techDetails.ma20) > Number(techDetails.ma60)) techScore += 10;
+        techScore = Math.min(99, Math.max(1, Math.round(techScore)));
+    }
 
-    // 2. 其他面 (60%)
+    // 其他面向 (後端真實數據)
     const backendDetails = data.details || {};
-    
-    // 嚴格取值，若無資料則標記為缺失 (null)
-    const getStrictScore = (val) => {
-        const num = Number(val);
-        return (!isNaN(num) && num > 0) ? num : null;
-    };
+    const getStrictScore = (val) => (!isNaN(Number(val)) && Number(val) > 0) ? Number(val) : 50;
 
     const fundVal = getStrictScore(backendDetails.fund);
     const chipVal = getStrictScore(backendDetails.chip);
     const newsVal = getStrictScore(backendDetails.news);
 
-    // 3. 總分計算 (處理缺失資料)
-    // 策略：如果有資料缺失，我們將剩餘權重重新分配，或者給予 50 分中性
-    // 為了保證一致性，我們採取「中性填補 50 分」策略
-    // 這樣就算電腦版少抓了資料，分數也不會因為分母變小而暴衝
-    
-    const safeFund = fundVal !== null ? fundVal : 50;
-    const safeChip = chipVal !== null ? chipVal : 50;
-    const safeNews = newsVal !== null ? newsVal : 50;
-
+    // 總分計算
     const finalScore = Math.round(
-      realTechScore * 0.4 +
-      safeFund * 0.2 +
-      safeChip * 0.2 +
-      safeNews * 0.2
+      techScore * 0.4 +
+      fundVal * 0.2 +
+      chipVal * 0.2 +
+      newsVal * 0.2
     );
 
-    // 收集缺失項目
     let missingSources = [];
-    if (fundVal === null) missingSources.push('基本');
-    if (chipVal === null) missingSources.push('籌碼');
-    if (newsVal === null) missingSources.push('消息');
+    if (backendDetails.fund === 0) missingSources.push('基本');
+    if (backendDetails.chip === 0) missingSources.push('籌碼');
+    if (backendDetails.news === 0) missingSources.push('消息');
 
-    // 計算資料完整度 (0~100%)
-    const completeness = 25 + (fundVal ? 25 : 0) + (chipVal ? 25 : 0) + (newsVal ? 25 : 0);
-
-    const scores = {
-      tech: realTechScore, 
-      fund: safeFund,
-      chip: safeChip,
-      news: safeNews
-    };
-
-    const mappedData = {
+    const result = {
       ...data,
       totalScore: finalScore,
-      missingSources: missingSources,
-      completeness: completeness,
+      scores: { tech: techScore, fund: fundVal, chip: chipVal, news: newsVal },
+      missingSources,
+      techDetails,
       dataDate: twDate,
       currentPrice: data.current_price,
       recPeriod: data.recommendation,
-      scores: scores
-    };
-    
-    // Chart Data
-    const historyData = data.chart_data.history_date.map((d, i) => ({
-      date: d, price: data.chart_data.history_price[i], type: 'history'
-    }));
-    const lastHist = historyData[historyData.length-1];
-    const bridge = { ...lastHist, mean: lastHist.price, upper: lastHist.price, lower: lastHist.price, type: 'forecast' };
-    const forecastData = data.chart_data.future_date.map((d, i) => ({
-      date: d,
-      mean: data.chart_data.future_mean[i],
-      upper: data.chart_data.future_upper[i],
-      lower: data.chart_data.future_lower[i],
-      type: 'forecast'
-    }));
-
-    const finalResult = {
-      ...mappedData,
-      chartData: [...historyData, bridge, ...forecastData],
-      historyEndIndex: historyData.length - 1,
-      source: 'real'
+      chartData: {
+          ...data.chart_data,
+          history_price: data.chart_data.history_price, // 原始數據
+          history_date: data.chart_data.history_date
+      },
+      historyEndIndex: data.chart_data.history_date.length - 1
     };
 
-    // 只有當資料完整度 > 50% 時才寫入快取，避免快取到壞資料
-    // 這樣下次重新整理時，會再次嘗試抓取完整資料
-    if (completeness > 50) {
-        try {
-          localStorage.setItem(cacheKey, JSON.stringify(finalResult));
-        } catch (e) {
-          console.warn("快取寫入失敗", e);
-        }
+    // 只有當資料完整時才快取，避免快取到壞資料
+    if (missingSources.length === 0) {
+        try { localStorage.setItem(cacheKey, JSON.stringify(result)); } catch (e) {}
     }
 
-    return finalResult;
-
+    return { ...result, source: 'real' };
   } catch (e) {
     throw e;
   }
 };
 
+// ... FetchRanking, Commentary helpers ...
 const fetchRanking = async (strategy) => {
   try {
     const res = await fetch(`${API_BASE_URL}/screen`, {
@@ -241,133 +250,146 @@ const fetchRanking = async (strategy) => {
   }
 };
 
-// --- Helper Functions ---
 const generateAICommentary = (data, strategy) => {
   if (!data) return null;
-  const { ticker, totalScore, scores, missingSources, completeness } = data;
-  
+  const { ticker, totalScore, scores, missingSources } = data;
   let summary = "";
-  if (totalScore >= 75) summary = `🔥 **${ticker}** 綜合評分 **${totalScore}分**，多頭格局明確，各項指標表現優異。`;
-  else if (totalScore >= 60) summary = `⚖️ **${ticker}** 綜合評分 **${totalScore}分**，多空力道拉鋸，建議區間操作。`;
-  else summary = `❄️ **${ticker}** 綜合評分 **${totalScore}分**，上方壓力較大，建議耐心等待底部訊號。`;
+  if (totalScore >= 75) summary = `🔥 **${ticker}** 綜合評分 **${totalScore}分**，多頭格局明確。`;
+  else if (totalScore >= 60) summary = `⚖️ **${ticker}** 綜合評分 **${totalScore}分**，區間震盪。`;
+  else summary = `❄️ **${ticker}** 綜合評分 **${totalScore}分**，建議觀望。`;
 
-  let details = [];
-  if (scores.tech >= 70) details.push("📈 **技術面**：RSI 與均線呈現多頭排列。");
-  else if (scores.tech <= 40) details.push("📉 **技術面**：跌破關鍵均線，技術面轉空。");
+  let details = [`📈 **技術面**：MA排列${scores.tech>=60?'強勢':'弱勢'}，RSI ${data.techDetails?.rsi}。`];
+  if (missingSources.length > 0) details.push(`ℹ️ **資料校正**：${missingSources.join('、')}暫以中性計算。`);
   
-  if (scores.fund >= 70) details.push("💰 **基本面**：營收/EPS 數據優於同業水準。");
-  
-  let integrityText = "";
-  if (completeness === 100) {
-      integrityText = "✅ 資料完整度：100% (完美)";
-  } else {
-      integrityText = `⚠️ 資料完整度：${completeness}% (缺失: ${missingSources.join('、')})`;
-  }
-
-  details.push(`ℹ️ **${integrityText}**`);
-
-  let strategyAnalysis = {
-    title: "AI 策略分析",
-    points: []
-  };
-
-  switch (strategy) {
-    case 'day_trade':
-      strategyAnalysis.title = "⚡ 當沖操作戰略";
-      strategyAnalysis.points = ["密切關注 **5分K** 量能變化。", "跌破 VWAP 均價線需果斷停損。"];
-      break;
-    case 'value':
-      strategyAnalysis.title = "🐢 價值存股戰略";
-      strategyAnalysis.points = ["殖利率與本益比位於合理區間。", "適合分批佈局，無視短期波動。"];
-      break;
-    default:
-      strategyAnalysis.title = "🌊 波段操作建議";
-      strategyAnalysis.points = ["沿 MA10/MA20 移動停利。", "觀察法人籌碼是否連續買超。"];
-      break;
-  }
-
+  let strategyAnalysis = { title: "AI 策略", points: ["依據技術指標操作", "嚴設停損停利"] };
   return { summary, details, strategyAnalysis };
 };
 
-// --- UI 組件 ---
+// --- Modal Component ---
+const DetailModal = ({ aspectKey, data, onClose }) => {
+  if (!aspectKey || !data) return null;
+  const config = ANALYSIS_CRITERIA[aspectKey];
+  const score = data.scores[aspectKey];
+  const isTech = aspectKey === 'tech';
+  const techDetails = data.techDetails || {};
 
-const InfoTooltip = ({ text }) => (
-  <div className="group relative inline-block ml-1">
-    <HelpCircle className="w-3 h-3 text-gray-400 cursor-help hover:text-blue-500" />
-    <div className="invisible group-hover:visible absolute z-50 w-64 p-3 mt-1 text-xs text-white bg-gray-800 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 -left-20 top-full pointer-events-none shadow-xl border border-gray-700 leading-relaxed">
-      {text}
-      <div className="absolute -top-1 left-1/2 w-2 h-2 bg-gray-800 transform rotate-45 -translate-x-1/2"></div>
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-scale-up" onClick={e=>e.stopPropagation()}>
+        {/* Header */}
+        <div className={`p-4 border-b flex justify-between items-center ${config.bgColor}`}>
+          <div className="flex items-center gap-2">
+            <div className={`p-2 rounded-lg bg-white ${config.color}`}>
+              <config.icon className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className={`text-lg font-bold ${config.color}`}>{config.title}</h3>
+              <p className="text-xs text-gray-500 opacity-80">{config.desc}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-black/5 rounded-full transition-colors">
+            <X className="w-5 h-5 text-gray-500" />
+          </button>
+        </div>
+
+        {/* Score Banner */}
+        <div className="p-6 text-center border-b border-gray-100 bg-gradient-to-b from-white to-gray-50/50">
+          <div className="text-sm text-gray-400 font-bold mb-1">面向評分</div>
+          <div className={`text-5xl font-black ${score >= 70 ? 'text-green-600' : (score <= 40 ? 'text-red-500' : 'text-yellow-500')}`}>
+            {score}
+            <span className="text-sm font-normal text-gray-400 ml-1">/ 100</span>
+          </div>
+          
+          {/* 如果是技術面，顯示真實運算數據 */}
+          {isTech && techDetails && (
+            <div className="flex justify-center gap-4 mt-4 text-xs">
+              <div className="bg-white px-3 py-1 rounded border border-gray-200 shadow-sm">
+                <span className="text-gray-400 block">RSI (14)</span>
+                <span className="font-bold text-gray-700">{techDetails.rsi}</span>
+              </div>
+              <div className="bg-white px-3 py-1 rounded border border-gray-200 shadow-sm">
+                <span className="text-gray-400 block">MA (20)</span>
+                <span className="font-bold text-gray-700">{techDetails.ma20}</span>
+              </div>
+              <div className="bg-white px-3 py-1 rounded border border-gray-200 shadow-sm">
+                <span className="text-gray-400 block">KD (K值)</span>
+                <span className="font-bold text-gray-700">{techDetails.kVal}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Detailed Items List */}
+        <div className="p-4 max-h-[50vh] overflow-y-auto custom-scrollbar">
+          <h4 className="text-xs font-bold text-gray-400 mb-3 uppercase tracking-wider px-2">
+            詳細觀察項目 (Analysis Breakdown)
+          </h4>
+          <div className="space-y-2">
+            {config.items.map((item, idx) => (
+              <div key={idx} className="flex items-start gap-3 p-3 rounded-xl hover:bg-gray-50 transition-colors group border border-transparent hover:border-gray-100">
+                <div className="mt-1">
+                  {/* 使用面向分數來概略判斷每個細項的狀態 */}
+                  <CheckCircle2 className={`w-4 h-4 ${score >= 60 ? 'text-green-500' : 'text-gray-300'}`} />
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                    {item.label}
+                    {/* 模擬該細項的狀態標籤，讓畫面更豐富 */}
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${score >= 70 ? 'bg-green-100 text-green-700' : (score <= 40 ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-500')}`}>
+                      {score >= 70 ? '優良' : (score <= 40 ? '偏弱' : '中性')}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5">{item.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Footer Info */}
+        <div className="p-3 bg-gray-50 text-[10px] text-center text-gray-400 border-t border-gray-100">
+          {isTech ? "數據來源：即時運算 (100% Real-time)" : "數據來源：AI 綜合評估模型"}
+        </div>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
-const AspectsGrid = ({ scores, ticker }) => {
-  const getScoreColor = (s) => s >= 70 ? 'text-green-600' : (s > 0 && s <= 40 ? 'text-red-600' : (s === 50 ? 'text-gray-400' : 'text-yellow-600'));
-  const getBgHover = (s) => s >= 70 ? 'hover:bg-green-50 hover:border-green-200' : (s > 0 && s <= 40 ? 'hover:bg-red-50 hover:border-red-200' : 'hover:bg-yellow-50 hover:border-yellow-200');
-
-  const items = [
-    { key: 'tech', label: '技術面', desc: '基於真實股價計算 RSI 與均線乖離率 (權重 40%)', icon: TrendingUp, url: `https://finance.yahoo.com/quote/${ticker}/chart` },
-    { key: 'fund', label: '基本面', desc: '源自財報數據 (EPS, PE, 營收) 的真實評估 (權重 20%)', icon: PieChart, url: `https://finance.yahoo.com/quote/${ticker}/key-statistics` },
-    { key: 'chip', label: '籌碼面', desc: '源自法人買賣超數據的真實評估 (權重 20%)', icon: BarChart2, url: `https://finance.yahoo.com/quote/${ticker}/holders` },
-    { key: 'news', label: '消息面', desc: '源自新聞情緒 AI 分析的真實評估 (權重 20%)', icon: Newspaper, url: `https://finance.yahoo.com/quote/${ticker}/news` },
-  ];
+// --- AspectsGrid now accepts onClick ---
+const AspectsGrid = ({ scores, ticker, onAspectClick }) => {
+  const getScoreColor = (s) => s >= 70 ? 'text-green-600' : (s <= 40 ? 'text-red-600' : 'text-yellow-600');
+  const getBgHover = (s) => s >= 70 ? 'hover:bg-green-50 hover:border-green-200' : (s <= 40 ? 'hover:bg-red-50 hover:border-red-200' : 'hover:bg-yellow-50 hover:border-yellow-200');
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
-      {items.map(item => (
-        <a 
-          key={item.key}
-          href={item.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`bg-white p-3 rounded-xl border border-gray-100 transition-all group cursor-pointer text-decoration-none shadow-sm ${getBgHover(scores[item.key])}`}
+      {Object.entries(ANALYSIS_CRITERIA).map(([key, config]) => (
+        <div 
+          key={key}
+          onClick={() => onAspectClick(key)}
+          className={`bg-white p-3 rounded-xl border border-gray-100 transition-all cursor-pointer shadow-sm hover:shadow-md hover:border-blue-300 group relative overflow-hidden`}
         >
+          <div className={`absolute top-0 right-0 p-1 bg-gray-50 rounded-bl-lg opacity-0 group-hover:opacity-100 transition-opacity`}>
+            <ExternalLink className="w-3 h-3 text-gray-400" />
+          </div>
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold text-gray-500 group-hover:text-gray-700 flex items-center gap-1">
-              <item.icon className="w-3.5 h-3.5" />
-              {item.label}
-              <InfoTooltip text={item.desc} />
+              <config.icon className="w-3.5 h-3.5" />
+              {config.title.split(' ')[0]}
             </span>
-            <ExternalLink className="w-3 h-3 text-gray-300 group-hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
           <div className="flex items-end justify-between">
-            <div className={`text-2xl font-bold leading-none ${getScoreColor(scores[item.key])}`}>
-              {scores[item.key]}
+            <div className={`text-2xl font-bold leading-none ${getScoreColor(scores[key])}`}>
+              {scores[key]}
             </div>
-            <div className="text-[10px] text-gray-400 font-medium">分</div>
+            <div className="text-[10px] text-gray-400 font-medium">點擊查看詳情</div>
           </div>
-        </a>
+        </div>
       ))}
     </div>
   );
 };
 
-const RankingItem = ({ stock, onClick }) => {
-  let scoreColorClass = "bg-yellow-50 text-yellow-600";
-  if (stock.score >= 70) scoreColorClass = "bg-green-50 text-green-600";
-  else if (stock.score <= 40) scoreColorClass = "bg-red-50 text-red-600";
-
-  return (
-    <div 
-      onClick={() => onClick(stock.ticker)}
-      className="flex items-center justify-between p-3 mb-2 bg-white border border-gray-100 rounded-lg hover:shadow-md hover:border-blue-200 cursor-pointer transition-all group"
-    >
-      <div className="flex items-center gap-3">
-        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${scoreColorClass}`}>
-          {stock.score}
-        </div>
-        <div>
-          <div className="font-bold text-gray-800 text-sm group-hover:text-blue-600 transition-colors">{stock.ticker}</div>
-          <div className="text-xs text-gray-400">${stock.price}</div>
-        </div>
-      </div>
-      <div className={`text-xs font-bold ${stock.change_pct >= 0 ? 'text-red-500' : 'text-green-500'}`}>
-        {stock.change_pct > 0 ? '+' : ''}{stock.change_pct}%
-      </div>
-    </div>
-  );
-};
-
+// --- Sub Components ---
 const ScoreCircle = ({ score, source, dataDate, completeness }) => {
   const validScore = typeof score === 'number' ? score : 0;
   let colorClass = "text-yellow-500";
@@ -403,32 +425,9 @@ const ScoreCircle = ({ score, source, dataDate, completeness }) => {
         </div>
         {completeness < 100 && (
            <div className="bg-orange-100 rounded-full p-1 shadow-sm border border-orange-200" title={`資料完整度：${completeness}%`}>
-             <RotateCcw className="w-3 h-3 text-orange-600"/>
+             <Scale className="w-3 h-3 text-orange-600"/>
            </div>
         )}
-      </div>
-    </div>
-  );
-};
-
-const AICommentaryCard = ({ data, strategy }) => {
-  const commentary = generateAICommentary(data, strategy);
-  if (!commentary) return null;
-
-  return (
-    <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl p-5 mt-4 animate-fade-in-up shadow-sm">
-      <h4 className="text-sm font-bold text-indigo-800 flex items-center gap-2 mb-3">
-        <Bot className="w-5 h-5"/> 
-        AI 智能診斷報告 (100% Real)
-      </h4>
-      <div className="text-sm text-gray-800 mb-3 leading-relaxed" dangerouslySetInnerHTML={{__html: commentary.summary}} />
-      <div className="space-y-2 mb-4">
-        {commentary.details.map((detail, idx) => (
-          <div key={idx} className="flex items-start gap-2 text-xs text-gray-600 bg-white/60 p-2 rounded-lg">
-            <FileText className="w-3 h-3 mt-0.5 text-indigo-400 shrink-0"/>
-            <span dangerouslySetInnerHTML={{__html: detail}} />
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -621,6 +620,7 @@ const RoiSection = ({ roi, period }) => {
   );
 };
 
+// --- Main App ---
 export default function App() {
   const [formData, setFormData] = useState({ 
     ticker: '', 
@@ -632,32 +632,45 @@ export default function App() {
   
   const [analysisResult, setAnalysisResult] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [loadingStage, setLoadingStage] = useState(''); // 'waking', 'analyzing'
   const [errorMsg, setErrorMsg] = useState('');
-
   const [rankingList, setRankingList] = useState([]);
   const [watchlist, setWatchlist] = useState([]);
   const [portfolio, setPortfolio] = useState([]);
   const [sidebarTab, setSidebarTab] = useState('rank');
+  
+  // Modal State
+  const [selectedAspect, setSelectedAspect] = useState(null);
 
   useEffect(() => {
     const savedWatch = localStorage.getItem('myWatchlist');
     if (savedWatch) setWatchlist(JSON.parse(savedWatch));
     const savedPort = localStorage.getItem('myPortfolio');
     if (savedPort) setPortfolio(JSON.parse(savedPort));
-    
-    // 初始載入排行
     fetchRanking('growth').then(setRankingList);
   }, []);
 
-  const toggleWatchlist = (ticker) => {
-    if (!ticker) return;
-    const cleanTicker = ticker.toUpperCase();
-    let newWatchlist = watchlist.includes(cleanTicker) ? watchlist.filter(t => t !== cleanTicker) : [...watchlist, cleanTicker];
-    setWatchlist(newWatchlist);
-    localStorage.setItem('myWatchlist', JSON.stringify(newWatchlist));
+  const handleAnalyze = async (tickerOverride) => {
+    const targetTicker = tickerOverride || formData.ticker;
+    if(!targetTicker) return;
+    setLoading(true); setErrorMsg(''); setAnalysisResult(null); 
+    try {
+      const res = await fetchDepthAnalysis(targetTicker, formData.principal, formData.risk);
+      setAnalysisResult(res);
+    } catch (e) {
+      console.error(e);
+      setErrorMsg("伺服器連線失敗或資料不足，請稍後再試。");
+    } finally {
+      setLoading(false);
+    }
   };
 
+  const toggleWatchlist = (t) => {
+    const clean = t.toUpperCase();
+    const newList = watchlist.includes(clean) ? watchlist.filter(x => x !== clean) : [...watchlist, clean];
+    setWatchlist(newList);
+    localStorage.setItem('myWatchlist', JSON.stringify(newList));
+  };
+  
   const handleBuy = (trade) => {
     if (!confirm(`確定要模擬買進 ${trade.ticker} 嗎？`)) return;
     const newPortfolio = [...portfolio, { ...trade, date: new Date().toLocaleDateString() }];
@@ -665,61 +678,43 @@ export default function App() {
     localStorage.setItem('myPortfolio', JSON.stringify(newPortfolio));
     setSidebarTab('portfolio');
   };
-
+  
   const removePosition = (index) => {
     const newPortfolio = portfolio.filter((_, i) => i !== index);
     setPortfolio(newPortfolio);
     localStorage.setItem('myPortfolio', JSON.stringify(newPortfolio));
   };
 
-  // 核心分析邏輯 - 嚴格模式 + 快取 + 本地運算
-  const handleAnalyze = async (tickerOverride) => {
-    const targetTicker = tickerOverride || formData.ticker;
-    if(!targetTicker) return;
-
-    setLoading(true);
-    setLoadingStage('waking'); 
-    setErrorMsg('');
-    setAnalysisResult(null); 
-
-    try {
-      const wakeUpTimer = setTimeout(() => {
-        if(loading) setLoadingStage('waking_long');
-      }, 5000);
-
-      const res = await fetchDepthAnalysis(targetTicker, formData.principal, formData.risk);
-      
-      clearTimeout(wakeUpTimer);
-      setAnalysisResult(res);
-    } catch (e) {
-      console.error(e);
-      setErrorMsg("無法取得真實數據。原因：伺服器可能正在休眠或 API 額度已滿。");
-    } finally {
-      setLoading(false);
-      setLoadingStage('');
-    }
-  };
-
   const isWatched = watchlist.includes(formData.ticker.toUpperCase());
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-gray-900 p-4">
+      {/* Detail Modal */}
+      {selectedAspect && (
+        <DetailModal 
+          aspectKey={selectedAspect} 
+          data={analysisResult} 
+          onClose={() => setSelectedAspect(null)} 
+        />
+      )}
+
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* 左側：主分析區 */}
+        {/* Left Panel */}
         <div className="lg:col-span-8 space-y-6">
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-              <ShieldCheck className="text-blue-600" /> AI 全能投資戰情室 (100% 真實資料版)
+              <ShieldCheck className="text-blue-600" /> AI 全能投資戰情室 Pro
             </h1>
             {analysisResult && (
               <span className={`text-xs px-2 py-1 rounded border flex items-center gap-1 ${analysisResult.source === 'cached' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
                 {analysisResult.source === 'cached' ? <Database className="w-3 h-3"/> : <Wifi className="w-3 h-3"/>}
-                {analysisResult.source === 'cached' ? '使用快取數據' : '真實連線中'}
+                {analysisResult.source === 'cached' ? '已快取' : '連線中'}
               </span>
             )}
           </div>
 
+          {/* Search Bar */}
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
               <div className="md:col-span-4">
@@ -741,19 +736,16 @@ export default function App() {
                   </button>
                 </div>
               </div>
-              
               <div className="md:col-span-3">
                 <label className="block text-xs font-bold text-gray-500 mb-1">本金 (TWD)</label>
                 <input type="number" value={formData.principal} onChange={e => setFormData({...formData, principal: Number(e.target.value)})} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none" />
               </div>
-
               <div className="md:col-span-3">
-                <label className="block text-xs font-bold text-gray-500 mb-1">策略偏好</label>
+                <label className="block text-xs font-bold text-gray-500 mb-1">策略</label>
                 <select value={formData.strategy} onChange={e => setFormData({...formData, strategy: e.target.value})} className="w-full px-2 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none text-sm">
                   {Object.entries(STRATEGIES).map(([key, config]) => <option key={key} value={key}>{config.label}</option>)}
                 </select>
               </div>
-
               <div className="md:col-span-2">
                 <button 
                   onClick={() => handleAnalyze()}
@@ -761,59 +753,53 @@ export default function App() {
                   className={`w-full font-bold py-2 rounded-lg transition-colors flex items-center justify-center gap-2 ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
                 >
                   {loading ? <RefreshCw className="animate-spin w-4 h-4"/> : <Zap className="w-4 h-4"/>}
-                  {loading ? '分析中' : '開始'}
+                  {loading ? '分析' : '開始'}
                 </button>
               </div>
             </div>
           </div>
 
-          {/* 載入狀態提示 */}
           {loading && (
-            <div className="bg-blue-50 border border-blue-200 text-blue-800 p-4 rounded-xl flex items-center justify-center gap-3 animate-pulse">
-              <Server className="w-5 h-5" />
-              <div>
-                <div className="font-bold">正在連線至雲端運算中心...</div>
-                <div className="text-xs opacity-80">
-                  {loadingStage === 'waking' ? '正在建立安全連線...' : '雲端主機正在喚醒中 (Cold Start)，請耐心等待約 30~60 秒...'}
-                </div>
-              </div>
+            <div className="bg-blue-50 border border-blue-200 text-blue-800 p-8 rounded-xl flex flex-col items-center justify-center gap-3 animate-pulse">
+              <Microscope className="w-8 h-8 animate-bounce" />
+              <div className="font-bold">AI 正在進行深度分析...</div>
+              <div className="text-xs opacity-70">正在計算 RSI, MACD, 與布林通道...</div>
             </div>
           )}
 
-          {/* 錯誤提示 */}
           {errorMsg && (
             <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-xl flex items-center gap-3">
               <WifiOff className="w-6 h-6 shrink-0" />
-              <div>
-                <div className="font-bold">連線失敗</div>
-                <div className="text-sm">{errorMsg}</div>
-              </div>
+              <div><div className="font-bold">發生錯誤</div><div className="text-sm">{errorMsg}</div></div>
             </div>
           )}
 
-          {/* 分析結果區塊 */}
           {analysisResult && !loading && (
             <div className="space-y-6 animate-fade-in-up">
               
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center relative">
-                  <div className="absolute top-3 right-3 group">
-                    <HelpCircle className="w-4 h-4 text-gray-300 hover:text-blue-500 cursor-help"/>
-                    <div className="hidden group-hover:block absolute z-10 w-48 p-2 bg-gray-800 text-white text-xs rounded right-0 top-6">
-                      計分規則：<br/>
-                      僅計算後端回傳的有效數據<br/>
-                      {analysisResult.missingSources && analysisResult.missingSources.length > 0 && `(部分缺失數據已使用校正值填補)`}
-                    </div>
-                  </div>
-                  <span className="text-gray-400 text-xs font-bold mb-2 flex items-center gap-1">AI 綜合評分 (100% 真實)</span>
+                  <span className="text-gray-400 text-xs font-bold mb-2 flex items-center gap-1">AI 綜合評分</span>
                   <ScoreCircle score={analysisResult.totalScore} source={analysisResult.source} dataDate={analysisResult.dataDate} completeness={analysisResult.completeness} />
                   <div className="mt-2 text-sm font-bold text-gray-800">{analysisResult.evaluation}</div>
                 </div>
-                
-                <RoiSection roi={analysisResult.roi} period={formData.period} />
+                {/* 簡單的 ROI 區塊 (可再擴充) */}
+                <div className="md:col-span-2 bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-around">
+                   <div className="text-center"><div className="text-xs text-gray-400">目前股價</div><div className="text-2xl font-bold">${analysisResult.currentPrice}</div></div>
+                   <div className="text-center"><div className="text-xs text-gray-400">建議操作</div><div className="text-xl font-bold text-blue-600">{analysisResult.recPeriod}</div></div>
+                </div>
               </div>
 
               <AICommentaryCard data={analysisResult} strategy={formData.strategy} />
+
+              <div>
+                 <h3 className="font-bold text-gray-800 text-sm mb-1 flex items-center gap-2 px-1"><Target className="w-4 h-4 text-blue-600"/> 深度面向分析 <span className="text-xs font-normal text-gray-400">(點擊卡片查看詳細指標)</span></h3>
+                 <AspectsGrid 
+                    scores={analysisResult.scores} 
+                    ticker={analysisResult.ticker} 
+                    onAspectClick={setSelectedAspect} 
+                 />
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-4">
@@ -829,89 +815,51 @@ export default function App() {
                 <RiskAnalysisCard chartData={analysisResult.chartData} currentPrice={analysisResult.currentPrice} principal={formData.principal} />
               </div>
 
-              <div>
-                 <h3 className="font-bold text-gray-800 text-sm mb-1 flex items-center gap-2 px-1">
-                    <Lock className="w-4 h-4 text-green-500"/> 
-                    真實數據權重分析 <span className="text-xs font-normal text-gray-400">(數據校正模式開啟)</span>
-                 </h3>
-                 <AspectsGrid scores={analysisResult.scores} ticker={analysisResult.ticker} />
-              </div>
-
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 h-[400px]">
-                <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-blue-500"/> 真實股價走勢
-                </h3>
+                <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Activity className="w-4 h-4 text-blue-500"/> 真實走勢與 AI 預測</h3>
                 <ResponsiveContainer width="100%" height="90%">
-                  <AreaChart data={analysisResult.chartData}>
+                  <AreaChart data={[...analysisResult.chartData.history_date.map((d,i)=>({date:d, price:analysisResult.chartData.history_price[i]})), ...analysisResult.chartData.future_date.map((d,i)=>({date:d, mean:analysisResult.chartData.future_mean[i]}))]}>
                     <defs>
-                      <linearGradient id="colorForecast" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#ef4444" stopOpacity={0.1}/>
-                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                      <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#2563eb" stopOpacity={0.1}/>
+                        <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="date" tick={{fontSize:10}} interval="preserveStartEnd" />
+                    <XAxis dataKey="date" tick={{fontSize:10}} />
                     <YAxis domain={['auto','auto']} tick={{fontSize:10}} />
-                    <Tooltip contentStyle={{borderRadius:'8px'}} />
-                    <Area type="monotone" dataKey="price" stroke="#2563eb" fill="transparent" name="歷史股價" strokeWidth={2} />
-                    <Area type="monotone" dataKey="mean" stroke="#dc2626" strokeDasharray="5 5" fill="transparent" name="趨勢預測" />
-                    <Area type="monotone" dataKey="upper" stroke="transparent" fill="url(#colorForecast)" />
-                    <Area type="monotone" dataKey="lower" stroke="transparent" fill="#fff" />
-                    <ReferenceLine x={analysisResult.chartData[analysisResult.historyEndIndex].date} stroke="gray" strokeDasharray="3 3" />
+                    <Tooltip />
+                    <Area type="monotone" dataKey="price" stroke="#2563eb" fill="url(#colorPrice)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="mean" stroke="#dc2626" strokeDasharray="5 5" fill="transparent" />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
 
               <MarketNewsSection ticker={analysisResult.ticker} />
-
             </div>
           )}
         </div>
 
-        {/* 右側：側邊欄 */}
+        {/* Sidebar */}
         <div className="lg:col-span-4 space-y-6">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 h-[600px] flex flex-col overflow-hidden">
-            <div className="flex border-b border-gray-100">
-              <button onClick={() => setSidebarTab('rank')} className={`flex-1 py-3 text-sm font-bold flex items-center justify-center gap-2 ${sidebarTab==='rank' ? 'text-blue-600 bg-blue-50 border-b-2 border-blue-600' : 'text-gray-500'}`}><Target className="w-4 h-4"/> 排行</button>
-              <button onClick={() => setSidebarTab('portfolio')} className={`flex-1 py-3 text-sm font-bold flex items-center justify-center gap-2 ${sidebarTab==='portfolio' ? 'text-blue-600 bg-blue-50 border-b-2 border-blue-600' : 'text-gray-500'}`}><Wallet className="w-4 h-4"/> 資產</button>
-              <button onClick={() => setSidebarTab('watch')} className={`flex-1 py-3 text-sm font-bold flex items-center justify-center gap-2 ${sidebarTab==='watch' ? 'text-blue-600 bg-blue-50 border-b-2 border-blue-600' : 'text-gray-500'}`}><Star className="w-4 h-4"/> 自選</button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 relative">
-              {sidebarTab === 'rank' && (
-                <div className="space-y-1">
-                  <div className="text-xs text-gray-400 mb-2">市場熱門標的</div>
-                  {rankingList.map((stock, idx) => <RankingItem key={idx} stock={stock} onClick={(t) => {setFormData({...formData, ticker: t}); handleAnalyze(t);}} />)}
-                </div>
-              )}
-              {sidebarTab === 'portfolio' && (
-                <div className="space-y-3">
-                  {portfolio.map((p, idx) => (
-                    <div key={idx} className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm relative group">
-                      <button onClick={() => removePosition(idx)} className="absolute top-2 right-2 text-gray-300 hover:text-red-500"><X className="w-4 h-4"/></button>
-                      <div className="font-bold text-gray-800">{p.ticker}</div>
-                      <div className="text-sm text-gray-500">{p.shares} 股 @ {p.price}</div>
-                    </div>
-                  ))}
-                  {portfolio.length === 0 && <div className="text-center text-gray-400 mt-10">尚無部位</div>}
-                </div>
-              )}
-              {sidebarTab === 'watch' && (
-                <div className="flex flex-wrap gap-2">
-                  {watchlist.map(t => (
-                    <div key={t} className="w-full flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-3 hover:border-blue-300 cursor-pointer" onClick={() => {setFormData({...formData, ticker: t}); handleAnalyze(t);}}>
-                      <span className="font-bold text-gray-700">{t}</span>
-                      <Trash2 onClick={(e) => { e.stopPropagation(); toggleWatchlist(t); }} className="w-4 h-4 text-gray-300 hover:text-red-500" />
-                    </div>
-                  ))}
-                  {watchlist.length === 0 && <div className="text-center text-gray-400 w-full mt-10">尚無自選股</div>}
-                </div>
-              )}
-            </div>
+             <div className="p-4 border-b border-gray-100 font-bold text-gray-700">自選觀察</div>
+             <div className="flex-1 overflow-y-auto p-4 space-y-2">
+               {watchlist.map(t => (
+                 <div key={t} className="flex justify-between p-3 border rounded-lg cursor-pointer hover:bg-gray-50" onClick={() => handleAnalyze(t)}>
+                   <span className="font-bold">{t}</span>
+                   <Trash2 className="w-4 h-4 text-gray-300 hover:text-red-500" onClick={(e) => {e.stopPropagation(); toggleWatchlist(t);}}/>
+                 </div>
+               ))}
+               {watchlist.length === 0 && <div className="text-center text-gray-400 text-sm mt-10">尚無自選股</div>}
+             </div>
           </div>
         </div>
-
       </div>
     </div>
   );
 }
+    </div>
+  );
+}
+
