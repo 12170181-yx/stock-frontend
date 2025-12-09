@@ -1,18 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, ReferenceLine } from 'recharts';
-import { TrendingUp, TrendingDown, DollarSign, Activity, BarChart2, PieChart, Newspaper, Zap, Search, ArrowRight, Shield, ShieldAlert, ShieldCheck, Wifi, WifiOff, Target, RefreshCw, ExternalLink, HelpCircle, Star, Trash2, AlertTriangle, Bot, FileText, Briefcase, Calculator, Globe, Clock, Anchor, MousePointerClick, Filter, CheckCircle2, Wallet, PlusCircle, X, Server, Lock, Database } from 'lucide-react';
+import { TrendingUp, DollarSign, Activity, BarChart2, PieChart, Newspaper, Zap, Search, ArrowRight, ShieldCheck, Wifi, WifiOff, Target, RefreshCw, ExternalLink, HelpCircle, Star, Trash2, AlertTriangle, Bot, FileText, Briefcase, Calculator, Globe, Filter, CheckCircle2, Wallet, PlusCircle, X, Server, Lock, Database } from 'lucide-react';
 
 // --- 常數設定 ---
 const API_BASE_URL = "https://stock-backend-g011.onrender.com"; 
 
-// --- 權重設定 ---
-const SCORE_WEIGHTS = {
-  tech: 0.3, // 技術面佔 30% (前端真實運算)
-  fund: 0.3, // 基本面佔 30% (後端真實數據)
-  chip: 0.2, // 籌碼面佔 20% (後端真實數據)
-  news: 0.2  // 消息面佔 20% (後端真實數據)
-};
-
+// --- 策略定義 ---
 const STRATEGIES = {
   none: { label: '無 (不限)', allowedPeriods: ['short', 'mid', 'long'], risk: 'neutral' },
   day_trade: { label: '⚡ 當沖 (極短)', allowedPeriods: ['short'], risk: 'aggressive' },
@@ -27,7 +20,8 @@ const PERIODS = {
   long: { label: '長期 (1年)', days: 250 }
 };
 
-// --- 本地端真實運算函數 (Local Real Calculation) ---
+// --- [核心運算] 本地端真實技術指標 (RSI & MA) ---
+// 這是基於數學公式的純函數，保證輸入相同股價，輸出相同分數
 
 const calculateRSI = (prices, period = 14) => {
   if (!prices || prices.length < period + 1) return 50;
@@ -35,6 +29,7 @@ const calculateRSI = (prices, period = 14) => {
   let gains = 0;
   let losses = 0;
 
+  // 初始平均
   for (let i = 1; i <= period; i++) {
     const diff = prices[i] - prices[i - 1];
     if (diff >= 0) gains += diff;
@@ -44,6 +39,7 @@ const calculateRSI = (prices, period = 14) => {
   let avgGain = gains / period;
   let avgLoss = losses / period;
 
+  // 平滑移動平均
   for (let i = period + 1; i < prices.length; i++) {
     const diff = prices[i] - prices[i - 1];
     const currentGain = diff > 0 ? diff : 0;
@@ -59,42 +55,41 @@ const calculateRSI = (prices, period = 14) => {
 };
 
 const calculateRealTechScore = (historyPrices) => {
-  if (!historyPrices || historyPrices.length < 30) return 50;
+  // 安全防護：若無歷史股價，回傳 null 代表無法計算
+  if (!historyPrices || historyPrices.length < 30) return null;
 
-  // 1. 計算 RSI (佔 40%)
+  // 1. 計算 RSI (40%)
   const rsi = calculateRSI(historyPrices);
   let rsiScore = 50;
   if (rsi > 70) rsiScore = 85; 
   else if (rsi < 30) rsiScore = 30; 
   else rsiScore = 50 + (rsi - 50); 
 
-  // 2. 計算均線趨勢 (MA Trend) (佔 60%)
+  // 2. 計算均線趨勢 (60%)
   const currentPrice = historyPrices[historyPrices.length - 1];
   const ma5 = historyPrices.slice(-5).reduce((a, b) => a + b, 0) / 5;
   const ma20 = historyPrices.slice(-20).reduce((a, b) => a + b, 0) / 20;
   const ma60 = historyPrices.slice(-60).reduce((a, b) => a + b, 0) / 60;
   
   let trendScore = 50;
-  // 多頭排列
+  // 多頭排列判定
   if (currentPrice > ma5 && ma5 > ma20 && ma20 > ma60) trendScore = 95;
   else if (currentPrice > ma20 && ma20 > ma60) trendScore = 80;
   else if (currentPrice > ma60) trendScore = 60;
-  // 空頭排列
+  // 空頭排列判定
   else if (currentPrice < ma5 && ma5 < ma20 && ma20 < ma60) trendScore = 20;
   else if (currentPrice < ma20) trendScore = 35;
   else trendScore = 45;
 
-  // 綜合技術分
   return Math.round(rsiScore * 0.4 + trendScore * 0.6);
 };
 
-// --- API 連線函數 (真實數據 + 單日快取鎖定) ---
+// --- [核心API] 連線與數據處理 ---
 
 const fetchDepthAnalysis = async (ticker, principal, risk) => {
   const cleanTicker = ticker.toUpperCase();
-  // V3 Cache Key: 確保每次更新程式碼後，用戶會抓到最新的真實資料，而不是舊的模擬資料
-  // 並且以日期為單位 (slice 0,10)，確保同一天內分數不會亂跳
-  const cacheKey = `stock_analysis_v3_${cleanTicker}_${new Date().toISOString().slice(0, 10)}`; 
+  // 使用快取鍵值 (以日期為單位)，確保同一天內同一人查詢結果一致
+  const cacheKey = `stock_real_v4_${cleanTicker}_${new Date().toISOString().slice(0, 10)}`; 
   
   const cachedData = localStorage.getItem(cacheKey);
   if (cachedData) {
@@ -102,6 +97,7 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
   }
 
   const controller = new AbortController();
+  // 延長超時至 90 秒，等待免費後端喚醒
   const timeoutId = setTimeout(() => controller.abort(), 90000); 
 
   try {
@@ -120,42 +116,67 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
     const data = await res.json();
     if(data.error) throw new Error(data.error);
     
-    // --- 核心邏輯修正：全面真實化 ---
+    // --- 100% 真實數據處理邏輯 ---
+    // 我們只使用有效數據，絕對不補假資料
     
-    // 1. 技術面：前端即時運算 (Real-time Calculation)
+    // 1. 技術面 (Tech): 前端真實運算
     const realHistoryPrices = data.chart_data.history_price;
     const realTechScore = calculateRealTechScore(realHistoryPrices);
 
-    // 2. 其他面：直接信任後端回傳的數據 (Backend Real Data)
-    // 這裡我們直接取用 API 的 details 欄位，不再使用任何模擬或雜湊鎖定
-    // 如果 API 回傳 0 或 null (可能因為免費版爬取失敗)，我們給予中性分 50，避免當機
+    // 2. 其他面 (Fund/Chip/News): 後端真實數據
+    // 注意：如果後端回傳 0 或 null，代表當下無數據，我們標記為 null
     const backendDetails = data.details || {};
-    
-    const scores = {
-      tech: realTechScore, 
-      fund: backendDetails.fund || 50, // 真實基本面
-      chip: backendDetails.chip || 50, // 真實籌碼面
-      news: backendDetails.news || 50  // 真實消息面
-    };
+    const realFundScore = backendDetails.fund > 0 ? backendDetails.fund : null;
+    const realChipScore = backendDetails.chip > 0 ? backendDetails.chip : null;
+    const realNewsScore = backendDetails.news > 0 ? backendDetails.news : null;
 
-    // 3. 重新計算加權總分 (前端驗證)
-    const calculatedTotal = Math.round(
-      scores.tech * SCORE_WEIGHTS.tech +
-      scores.fund * SCORE_WEIGHTS.fund +
-      scores.chip * SCORE_WEIGHTS.chip +
-      scores.news * SCORE_WEIGHTS.news
-    );
+    // 3. 動態加權總分計算 (Dynamic Scoring)
+    // 只平均「有效」的分數，確保總分真實反映已知資訊
+    let totalScoreSum = 0;
+    let validCount = 0;
+    let validSources = [];
+
+    if (realTechScore !== null) {
+      totalScoreSum += realTechScore;
+      validCount++;
+      validSources.push("技術");
+    }
+    if (realFundScore !== null) {
+      totalScoreSum += realFundScore;
+      validCount++;
+      validSources.push("基本");
+    }
+    if (realChipScore !== null) {
+      totalScoreSum += realChipScore;
+      validCount++;
+      validSources.push("籌碼");
+    }
+    if (realNewsScore !== null) {
+      totalScoreSum += realNewsScore;
+      validCount++;
+      validSources.push("消息");
+    }
+
+    // 如果完全沒有數據 (極少見)，給予中性分
+    const finalScore = validCount > 0 ? Math.round(totalScoreSum / validCount) : 50;
+
+    const scores = {
+      tech: realTechScore || 0, 
+      fund: realFundScore || 0,
+      chip: realChipScore || 0,
+      news: realNewsScore || 0
+    };
 
     const mappedData = {
       ...data,
-      totalScore: calculatedTotal,
-      verifiedScore: calculatedTotal,
-      isVerified: true,
+      totalScore: finalScore,
+      validSources: validSources, // 紀錄哪些數據是真實有效的
       currentPrice: data.current_price,
       recPeriod: data.recommendation,
       scores: scores
     };
     
+    // 圖表數據整理
     const historyData = data.chart_data.history_date.map((d, i) => ({
       date: d, price: data.chart_data.history_price[i], type: 'history'
     }));
@@ -176,6 +197,7 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
       source: 'real'
     };
 
+    // 寫入快取，鎖定今日結果
     try {
       localStorage.setItem(cacheKey, JSON.stringify(finalResult));
     } catch (e) {
@@ -209,18 +231,26 @@ const fetchRanking = async (strategy) => {
 // --- Helper Functions ---
 const generateAICommentary = (data, strategy) => {
   if (!data) return null;
-  const { ticker, totalScore, scores } = data;
+  const { ticker, totalScore, scores, validSources } = data;
   
   let summary = "";
-  if (totalScore >= 75) summary = `🔥 **${ticker}** 數據表現強勁，真實加權總分達 **${totalScore}分**，市場共識偏多。`;
+  if (totalScore >= 75) summary = `🔥 **${ticker}** 真實數據表現強勁，綜合評分 **${totalScore}分**，市場共識偏多。`;
   else if (totalScore >= 60) summary = `⚖️ **${ticker}** 進入盤整區間，評分 **${totalScore}分**，多空力道均衡。`;
   else summary = `❄️ **${ticker}** 各項指標偏弱，評分僅 **${totalScore}分**，建議保守觀望。`;
 
   let details = [];
-  if (scores.tech >= 70) details.push("📈 **技術面 (30%)**：RSI 與均線呈現多頭排列。");
-  else if (scores.tech <= 40) details.push("📉 **技術面 (30%)**：跌破關鍵均線，技術面轉空。");
+  // 根據真實數據動態產生評語
+  if (scores.tech >= 70) details.push("📈 **技術面**：RSI 與均線呈現多頭排列。");
+  else if (scores.tech > 0 && scores.tech <= 40) details.push("📉 **技術面**：跌破關鍵均線，技術面轉空。");
   
-  if (scores.fund >= 70) details.push("💰 **基本面 (30%)**：營收/EPS 數據優於同業水準。");
+  if (scores.fund >= 70) details.push("💰 **基本面**：營收/EPS 數據優於同業水準。");
+  
+  // 顯示數據完整性提示
+  const sourceText = validSources && validSources.length < 4 
+    ? `(註：本評分基於 ${validSources.join('、')} 真實數據計算)` 
+    : "(數據完整度：100%)";
+
+  details.push(`ℹ️ **數據來源**：${sourceText}`);
 
   let strategyAnalysis = {
     title: "AI 策略分析",
@@ -258,14 +288,14 @@ const InfoTooltip = ({ text }) => (
 );
 
 const AspectsGrid = ({ scores, ticker }) => {
-  const getScoreColor = (s) => s >= 70 ? 'text-green-600' : (s <= 40 ? 'text-red-600' : 'text-yellow-600');
-  const getBgHover = (s) => s >= 70 ? 'hover:bg-green-50 hover:border-green-200' : (s <= 40 ? 'hover:bg-red-50 hover:border-red-200' : 'hover:bg-yellow-50 hover:border-yellow-200');
+  const getScoreColor = (s) => s >= 70 ? 'text-green-600' : (s > 0 && s <= 40 ? 'text-red-600' : (s === 0 ? 'text-gray-400' : 'text-yellow-600'));
+  const getBgHover = (s) => s >= 70 ? 'hover:bg-green-50 hover:border-green-200' : (s > 0 && s <= 40 ? 'hover:bg-red-50 hover:border-red-200' : 'hover:bg-yellow-50 hover:border-yellow-200');
 
   const items = [
-    { key: 'tech', label: '技術面', weight: '30%', desc: '基於真實股價計算 RSI 與均線乖離率', icon: TrendingUp, url: `https://finance.yahoo.com/quote/${ticker}/chart` },
-    { key: 'fund', label: '基本面', weight: '30%', desc: '源自財報數據 (EPS, PE, 營收) 的真實評估', icon: PieChart, url: `https://finance.yahoo.com/quote/${ticker}/key-statistics` },
-    { key: 'chip', label: '籌碼面', weight: '20%', desc: '源自法人買賣超數據的真實評估', icon: BarChart2, url: `https://finance.yahoo.com/quote/${ticker}/holders` },
-    { key: 'news', label: '消息面', weight: '20%', desc: '源自新聞情緒 AI 分析的真實評估', icon: Newspaper, url: `https://finance.yahoo.com/quote/${ticker}/news` },
+    { key: 'tech', label: '技術面', desc: '基於真實股價計算 RSI 與均線乖離率', icon: TrendingUp, url: `https://finance.yahoo.com/quote/${ticker}/chart` },
+    { key: 'fund', label: '基本面', desc: '源自財報數據 (EPS, PE, 營收) 的真實評估', icon: PieChart, url: `https://finance.yahoo.com/quote/${ticker}/key-statistics` },
+    { key: 'chip', label: '籌碼面', desc: '源自法人買賣超數據的真實評估', icon: BarChart2, url: `https://finance.yahoo.com/quote/${ticker}/holders` },
+    { key: 'news', label: '消息面', desc: '源自新聞情緒 AI 分析的真實評估', icon: Newspaper, url: `https://finance.yahoo.com/quote/${ticker}/news` },
   ];
 
   return (
@@ -282,14 +312,13 @@ const AspectsGrid = ({ scores, ticker }) => {
             <span className="text-xs font-bold text-gray-500 group-hover:text-gray-700 flex items-center gap-1">
               <item.icon className="w-3.5 h-3.5" />
               {item.label}
-              <span className="text-[10px] bg-gray-100 text-gray-500 px-1 rounded">{item.weight}</span>
               <InfoTooltip text={item.desc} />
             </span>
             <ExternalLink className="w-3 h-3 text-gray-300 group-hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
           <div className="flex items-end justify-between">
             <div className={`text-2xl font-bold leading-none ${getScoreColor(scores[item.key])}`}>
-              {scores[item.key]}
+              {scores[item.key] > 0 ? scores[item.key] : '--'}
             </div>
             <div className="text-[10px] text-gray-400 font-medium">分</div>
           </div>
@@ -325,7 +354,7 @@ const RankingItem = ({ stock, onClick }) => {
   );
 };
 
-const ScoreCircle = ({ score, isVerified, source }) => {
+const ScoreCircle = ({ score, source }) => {
   const validScore = typeof score === 'number' ? score : 0;
   let colorClass = "text-yellow-500";
   let strokeColor = "#eab308";
@@ -353,12 +382,9 @@ const ScoreCircle = ({ score, isVerified, source }) => {
           className="transition-all duration-1000 ease-out"
         />
       </svg>
-      {/* 驗證徽章 */}
-      {isVerified && (
-        <div className="absolute -bottom-1 bg-white rounded-full p-1 shadow-sm border border-green-100 flex items-center gap-1" title={source === 'cached' ? "數據來源：本地快取 (穩定)" : "數據來源：即時運算 (真實)"}>
-          {source === 'cached' ? <Database className="w-3 h-3 text-blue-500"/> : <ShieldCheck className="w-3 h-3 text-green-500" />}
-        </div>
-      )}
+      <div className="absolute -bottom-1 bg-white rounded-full p-1 shadow-sm border border-green-100 flex items-center gap-1" title={source === 'cached' ? "數據來源：今日快取 (穩定)" : "數據來源：真實運算 (即時)"}>
+        {source === 'cached' ? <Database className="w-3 h-3 text-blue-500"/> : <ShieldCheck className="w-3 h-3 text-green-500" />}
+      </div>
     </div>
   );
 };
@@ -371,7 +397,7 @@ const AICommentaryCard = ({ data, strategy }) => {
     <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl p-5 mt-4 animate-fade-in-up shadow-sm">
       <h4 className="text-sm font-bold text-indigo-800 flex items-center gap-2 mb-3">
         <Bot className="w-5 h-5"/> 
-        AI 智能診斷報告 (Real-time)
+        AI 智能診斷報告 (100% Real)
       </h4>
       <div className="text-sm text-gray-800 mb-3 leading-relaxed" dangerouslySetInnerHTML={{__html: commentary.summary}} />
       <div className="space-y-2 mb-4">
@@ -662,7 +688,7 @@ export default function App() {
         <div className="lg:col-span-8 space-y-6">
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-              <ShieldCheck className="text-blue-600" /> AI 全能投資戰情室 (嚴格真實模式)
+              <ShieldCheck className="text-blue-600" /> AI 全能投資戰情室 (100% 真實資料版)
             </h1>
             {analysisResult && (
               <span className={`text-xs px-2 py-1 rounded border flex items-center gap-1 ${analysisResult.source === 'cached' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
@@ -752,12 +778,13 @@ export default function App() {
                   <div className="absolute top-3 right-3 group">
                     <HelpCircle className="w-4 h-4 text-gray-300 hover:text-blue-500 cursor-help"/>
                     <div className="hidden group-hover:block absolute z-10 w-48 p-2 bg-gray-800 text-white text-xs rounded right-0 top-6">
-                      總分計算公式：<br/>
-                      技術(30%) + 基本(30%) + <br/>籌碼(20%) + 消息(20%)
+                      計分規則：<br/>
+                      僅計算後端回傳的有效數據<br/>
+                      {analysisResult.validSources && `目前依據：${analysisResult.validSources.join('+')}`}
                     </div>
                   </div>
-                  <span className="text-gray-400 text-xs font-bold mb-2 flex items-center gap-1">AI 綜合評分 (已驗證)</span>
-                  <ScoreCircle score={analysisResult.totalScore} isVerified={analysisResult.isVerified} source={analysisResult.source} />
+                  <span className="text-gray-400 text-xs font-bold mb-2 flex items-center gap-1">AI 綜合評分 (100% 真實)</span>
+                  <ScoreCircle score={analysisResult.totalScore} source={analysisResult.source} />
                   <div className="mt-2 text-sm font-bold text-gray-800">{analysisResult.evaluation}</div>
                 </div>
                 
@@ -783,7 +810,7 @@ export default function App() {
               <div>
                  <h3 className="font-bold text-gray-800 text-sm mb-1 flex items-center gap-2 px-1">
                     <Lock className="w-4 h-4 text-green-500"/> 
-                    真實數據權重分析 <span className="text-xs font-normal text-gray-400">(點擊卡片驗證來源)</span>
+                    真實數據權重分析 <span className="text-xs font-normal text-gray-400">(灰色代表該項數據目前無法取得)</span>
                  </h3>
                  <AspectsGrid scores={analysisResult.scores} ticker={analysisResult.ticker} />
               </div>
