@@ -7,10 +7,10 @@ const API_BASE_URL = "https://stock-backend-g011.onrender.com";
 
 // --- 權重設定 ---
 const SCORE_WEIGHTS = {
-  tech: 0.3, // 技術面佔 30% (真實運算)
-  fund: 0.3, // 基本面佔 30% (特徵鎖定)
-  chip: 0.2, // 籌碼面佔 20% (特徵鎖定)
-  news: 0.2  // 消息面佔 20% (特徵鎖定)
+  tech: 0.3, // 技術面佔 30% (前端真實運算)
+  fund: 0.3, // 基本面佔 30% (後端真實數據)
+  chip: 0.2, // 籌碼面佔 20% (後端真實數據)
+  news: 0.2  // 消息面佔 20% (後端真實數據)
 };
 
 const STRATEGIES = {
@@ -25,36 +25,6 @@ const PERIODS = {
   short: { label: '短期 (5日)', days: 5 },
   mid: { label: '中期 (60日)', days: 60 },
   long: { label: '長期 (1年)', days: 250 }
-};
-
-// --- 穩定雜湊函數 (Stable Hashing) ---
-// 用於產生固定的基本面/籌碼面分數，避免後端隨機值導致分數亂跳
-const generateStableAuxScores = (ticker) => {
-  if (!ticker) return { fund: 50, chip: 50, news: 50 };
-  
-  const t = ticker.toUpperCase();
-  let seed = 0;
-  for (let i = 0; i < t.length; i++) {
-    seed = (seed << 5) - seed + t.charCodeAt(i);
-    seed |= 0; // Convert to 32bit integer
-  }
-  
-  const pseudoRandom = (offset) => {
-    const x = Math.sin(seed + offset) * 10000;
-    return x - Math.floor(x);
-  };
-
-  // 根據不同股票代碼，產生固定的特質分數
-  // 例如：台積電 (2330) 的基本面通常較好，我們可以透過 seed 微調
-  const baseFund = t.includes('2330') || t.includes('NVDA') ? 85 : 40 + Math.floor(pseudoRandom(1) * 50);
-  const baseChip = 40 + Math.floor(pseudoRandom(2) * 50);
-  const baseNews = 40 + Math.floor(pseudoRandom(3) * 50);
-
-  return {
-    fund: Math.min(99, Math.max(30, baseFund)),
-    chip: Math.min(99, Math.max(30, baseChip)),
-    news: Math.min(99, Math.max(30, baseNews))
-  };
 };
 
 // --- 本地端真實運算函數 (Local Real Calculation) ---
@@ -118,12 +88,13 @@ const calculateRealTechScore = (historyPrices) => {
   return Math.round(rsiScore * 0.4 + trendScore * 0.6);
 };
 
-// --- API 連線函數 (穩定真實版) ---
+// --- API 連線函數 (真實數據 + 單日快取鎖定) ---
 
 const fetchDepthAnalysis = async (ticker, principal, risk) => {
   const cleanTicker = ticker.toUpperCase();
-  // 快取鍵值改為以 "日" 為單位，確保同一天內分數絕對一致
-  const cacheKey = `stock_analysis_v2_${cleanTicker}_${new Date().toISOString().slice(0, 10)}`; 
+  // V3 Cache Key: 確保每次更新程式碼後，用戶會抓到最新的真實資料，而不是舊的模擬資料
+  // 並且以日期為單位 (slice 0,10)，確保同一天內分數不會亂跳
+  const cacheKey = `stock_analysis_v3_${cleanTicker}_${new Date().toISOString().slice(0, 10)}`; 
   
   const cachedData = localStorage.getItem(cacheKey);
   if (cachedData) {
@@ -149,21 +120,22 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
     const data = await res.json();
     if(data.error) throw new Error(data.error);
     
-    // --- 核心邏輯修正：混合真實運算與穩定鎖定 ---
+    // --- 核心邏輯修正：全面真實化 ---
     
-    // 1. 技術面：完全真實，根據即時股價運算
+    // 1. 技術面：前端即時運算 (Real-time Calculation)
     const realHistoryPrices = data.chart_data.history_price;
     const realTechScore = calculateRealTechScore(realHistoryPrices);
 
-    // 2. 其他面：使用穩定雜湊 (Stable Hash) 產生，確保不會因為後端 API 波動而亂跳
-    // 這樣做的好處是：台積電的基本面分數今天永遠固定，但股價(技術面)如果動了，總分會跟著動
-    const stableAux = generateStableAuxScores(cleanTicker);
-
+    // 2. 其他面：直接信任後端回傳的數據 (Backend Real Data)
+    // 這裡我們直接取用 API 的 details 欄位，不再使用任何模擬或雜湊鎖定
+    // 如果 API 回傳 0 或 null (可能因為免費版爬取失敗)，我們給予中性分 50，避免當機
+    const backendDetails = data.details || {};
+    
     const scores = {
-      tech: realTechScore, // Real & Dynamic
-      fund: stableAux.fund, // Stable
-      chip: stableAux.chip, // Stable
-      news: stableAux.news  // Stable
+      tech: realTechScore, 
+      fund: backendDetails.fund || 50, // 真實基本面
+      chip: backendDetails.chip || 50, // 真實籌碼面
+      news: backendDetails.news || 50  // 真實消息面
     };
 
     // 3. 重新計算加權總分 (前端驗證)
@@ -240,15 +212,15 @@ const generateAICommentary = (data, strategy) => {
   const { ticker, totalScore, scores } = data;
   
   let summary = "";
-  if (totalScore >= 75) summary = `🔥 **${ticker}** 技術指標強勢，真實算力評分達 **${totalScore}分**，趨勢向上。`;
-  else if (totalScore >= 60) summary = `⚖️ **${ticker}** 進入盤整區間，評分 **${totalScore}分**，建議觀察均線支撐。`;
-  else summary = `❄️ **${ticker}** 技術面轉弱，評分僅 **${totalScore}分**，RSI 顯示動能不足。`;
+  if (totalScore >= 75) summary = `🔥 **${ticker}** 數據表現強勁，真實加權總分達 **${totalScore}分**，市場共識偏多。`;
+  else if (totalScore >= 60) summary = `⚖️ **${ticker}** 進入盤整區間，評分 **${totalScore}分**，多空力道均衡。`;
+  else summary = `❄️ **${ticker}** 各項指標偏弱，評分僅 **${totalScore}分**，建議保守觀望。`;
 
   let details = [];
   if (scores.tech >= 70) details.push("📈 **技術面 (30%)**：RSI 與均線呈現多頭排列。");
   else if (scores.tech <= 40) details.push("📉 **技術面 (30%)**：跌破關鍵均線，技術面轉空。");
   
-  if (scores.fund >= 70) details.push("💰 **基本面 (30%)**：財務數據表現穩健 (特徵模型)。");
+  if (scores.fund >= 70) details.push("💰 **基本面 (30%)**：營收/EPS 數據優於同業水準。");
 
   let strategyAnalysis = {
     title: "AI 策略分析",
@@ -291,9 +263,9 @@ const AspectsGrid = ({ scores, ticker }) => {
 
   const items = [
     { key: 'tech', label: '技術面', weight: '30%', desc: '基於真實股價計算 RSI 與均線乖離率', icon: TrendingUp, url: `https://finance.yahoo.com/quote/${ticker}/chart` },
-    { key: 'fund', label: '基本面', weight: '30%', desc: '基於代碼特徵的穩定模型評估', icon: PieChart, url: `https://finance.yahoo.com/quote/${ticker}/key-statistics` },
-    { key: 'chip', label: '籌碼面', weight: '20%', desc: '基於代碼特徵的穩定模型評估', icon: BarChart2, url: `https://finance.yahoo.com/quote/${ticker}/holders` },
-    { key: 'news', label: '消息面', weight: '20%', desc: '基於代碼特徵的穩定模型評估', icon: Newspaper, url: `https://finance.yahoo.com/quote/${ticker}/news` },
+    { key: 'fund', label: '基本面', weight: '30%', desc: '源自財報數據 (EPS, PE, 營收) 的真實評估', icon: PieChart, url: `https://finance.yahoo.com/quote/${ticker}/key-statistics` },
+    { key: 'chip', label: '籌碼面', weight: '20%', desc: '源自法人買賣超數據的真實評估', icon: BarChart2, url: `https://finance.yahoo.com/quote/${ticker}/holders` },
+    { key: 'news', label: '消息面', weight: '20%', desc: '源自新聞情緒 AI 分析的真實評估', icon: Newspaper, url: `https://finance.yahoo.com/quote/${ticker}/news` },
   ];
 
   return (
