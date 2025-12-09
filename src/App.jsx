@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, ReferenceLine } from 'recharts';
-import { TrendingUp, DollarSign, Activity, BarChart2, PieChart, Newspaper, Zap, Search, ArrowRight, ShieldCheck, Wifi, WifiOff, Target, RefreshCw, ExternalLink, HelpCircle, Star, Trash2, AlertTriangle, Bot, FileText, Briefcase, Calculator, Globe, Filter, CheckCircle2, Wallet, PlusCircle, X, Server, Lock, Database } from 'lucide-react';
+import { TrendingUp, DollarSign, Activity, BarChart2, PieChart, Newspaper, Zap, Search, ArrowRight, ShieldCheck, Wifi, WifiOff, Target, RefreshCw, ExternalLink, HelpCircle, Star, Trash2, AlertTriangle, Bot, FileText, Briefcase, Calculator, Globe, Filter, CheckCircle2, Wallet, PlusCircle, X, Server, Lock, Database, Clock } from 'lucide-react';
 
 // --- 常數設定 ---
 const API_BASE_URL = "https://stock-backend-g011.onrender.com"; 
@@ -54,9 +54,12 @@ const calculateRSI = (prices, period = 14) => {
   return 100 - (100 / (1 + rs));
 };
 
-const calculateRealTechScore = (historyPrices) => {
-  // 安全防護：若無歷史股價，回傳 null 代表無法計算
-  if (!historyPrices || historyPrices.length < 30) return null;
+const calculateRealTechScore = (fullHistoryPrices) => {
+  // 標準化：強制取最後 65 筆資料進行計算，確保跨裝置計算基準一致
+  // 避免電腦版抓到 100 筆，手機版抓到 99 筆導致均線數值微幅誤差
+  if (!fullHistoryPrices || fullHistoryPrices.length < 30) return null;
+  
+  const historyPrices = fullHistoryPrices.slice(-65); 
 
   // 1. 計算 RSI (40%)
   const rsi = calculateRSI(historyPrices);
@@ -88,8 +91,11 @@ const calculateRealTechScore = (historyPrices) => {
 
 const fetchDepthAnalysis = async (ticker, principal, risk) => {
   const cleanTicker = ticker.toUpperCase();
-  // 使用快取鍵值 (以日期為單位)，確保同一天內同一人查詢結果一致
-  const cacheKey = `stock_real_v4_${cleanTicker}_${new Date().toISOString().slice(0, 10)}`; 
+  
+  // --- 一致性修正 1: 使用台灣時間 (Asia/Taipei) 作為快取鍵值 ---
+  // 解決 UTC 時間在早上 8 點前導致電腦與手機快取 Key 不同的問題
+  const twDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }); // 格式 YYYY-MM-DD
+  const cacheKey = `stock_real_v5_${cleanTicker}_${twDate}`; 
   
   const cachedData = localStorage.getItem(cacheKey);
   if (cachedData) {
@@ -117,18 +123,22 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
     if(data.error) throw new Error(data.error);
     
     // --- 100% 真實數據處理邏輯 ---
-    // 我們只使用有效數據，絕對不補假資料
     
     // 1. 技術面 (Tech): 前端真實運算
     const realHistoryPrices = data.chart_data.history_price;
     const realTechScore = calculateRealTechScore(realHistoryPrices);
 
     // 2. 其他面 (Fund/Chip/News): 後端真實數據
-    // 注意：如果後端回傳 0 或 null，代表當下無數據，我們標記為 null
+    // 強制轉型 Number，避免字串 "50" 導致計算錯誤
     const backendDetails = data.details || {};
-    const realFundScore = backendDetails.fund > 0 ? backendDetails.fund : null;
-    const realChipScore = backendDetails.chip > 0 ? backendDetails.chip : null;
-    const realNewsScore = backendDetails.news > 0 ? backendDetails.news : null;
+    const parseScore = (val) => {
+        const num = Number(val);
+        return (!isNaN(num) && num > 0) ? num : null;
+    };
+
+    const realFundScore = parseScore(backendDetails.fund);
+    const realChipScore = parseScore(backendDetails.chip);
+    const realNewsScore = parseScore(backendDetails.news);
 
     // 3. 動態加權總分計算 (Dynamic Scoring)
     // 只平均「有效」的分數，確保總分真實反映已知資訊
@@ -157,7 +167,6 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
       validSources.push("消息");
     }
 
-    // 如果完全沒有數據 (極少見)，給予中性分
     const finalScore = validCount > 0 ? Math.round(totalScoreSum / validCount) : 50;
 
     const scores = {
@@ -167,10 +176,14 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
       news: realNewsScore || 0
     };
 
+    // 取得資料的最新日期，用於顯示給使用者確認是否同步
+    const lastDate = data.chart_data.history_date[data.chart_data.history_date.length - 1] || twDate;
+
     const mappedData = {
       ...data,
       totalScore: finalScore,
-      validSources: validSources, // 紀錄哪些數據是真實有效的
+      validSources: validSources,
+      dataDate: lastDate, // 標記資料日期
       currentPrice: data.current_price,
       recPeriod: data.recommendation,
       scores: scores
@@ -197,7 +210,7 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
       source: 'real'
     };
 
-    // 寫入快取，鎖定今日結果
+    // 寫入快取
     try {
       localStorage.setItem(cacheKey, JSON.stringify(finalResult));
     } catch (e) {
@@ -239,13 +252,11 @@ const generateAICommentary = (data, strategy) => {
   else summary = `❄️ **${ticker}** 各項指標偏弱，評分僅 **${totalScore}分**，建議保守觀望。`;
 
   let details = [];
-  // 根據真實數據動態產生評語
   if (scores.tech >= 70) details.push("📈 **技術面**：RSI 與均線呈現多頭排列。");
   else if (scores.tech > 0 && scores.tech <= 40) details.push("📉 **技術面**：跌破關鍵均線，技術面轉空。");
   
   if (scores.fund >= 70) details.push("💰 **基本面**：營收/EPS 數據優於同業水準。");
   
-  // 顯示數據完整性提示
   const sourceText = validSources && validSources.length < 4 
     ? `(註：本評分基於 ${validSources.join('、')} 真實數據計算)` 
     : "(數據完整度：100%)";
@@ -354,7 +365,7 @@ const RankingItem = ({ stock, onClick }) => {
   );
 };
 
-const ScoreCircle = ({ score, source }) => {
+const ScoreCircle = ({ score, source, dataDate }) => {
   const validScore = typeof score === 'number' ? score : 0;
   let colorClass = "text-yellow-500";
   let strokeColor = "#eab308";
@@ -382,8 +393,16 @@ const ScoreCircle = ({ score, source }) => {
           className="transition-all duration-1000 ease-out"
         />
       </svg>
-      <div className="absolute -bottom-1 bg-white rounded-full p-1 shadow-sm border border-green-100 flex items-center gap-1" title={source === 'cached' ? "數據來源：今日快取 (穩定)" : "數據來源：真實運算 (即時)"}>
-        {source === 'cached' ? <Database className="w-3 h-3 text-blue-500"/> : <ShieldCheck className="w-3 h-3 text-green-500" />}
+      {/* 狀態標籤區 */}
+      <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex gap-1">
+        <div className="bg-white rounded-full p-1 shadow-sm border border-green-100" title={source === 'cached' ? "數據來源：今日快取 (穩定)" : "數據來源：真實運算 (即時)"}>
+          {source === 'cached' ? <Database className="w-3 h-3 text-blue-500"/> : <ShieldCheck className="w-3 h-3 text-green-500" />}
+        </div>
+        {dataDate && (
+          <div className="bg-white rounded-full px-1.5 py-0.5 shadow-sm border border-gray-200 text-[8px] font-bold text-gray-500 flex items-center" title={`資料基準日: ${dataDate}`}>
+            {dataDate.slice(5)}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -784,7 +803,7 @@ export default function App() {
                     </div>
                   </div>
                   <span className="text-gray-400 text-xs font-bold mb-2 flex items-center gap-1">AI 綜合評分 (100% 真實)</span>
-                  <ScoreCircle score={analysisResult.totalScore} source={analysisResult.source} />
+                  <ScoreCircle score={analysisResult.totalScore} source={analysisResult.source} dataDate={analysisResult.dataDate} />
                   <div className="mt-2 text-sm font-bold text-gray-800">{analysisResult.evaluation}</div>
                 </div>
                 
