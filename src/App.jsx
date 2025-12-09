@@ -5,7 +5,7 @@ import { TrendingUp, Activity, BarChart2, PieChart, Newspaper, Zap, Search, Shie
 // ⚠️ 請確認這是您 Render 後端的網址
 const API_BASE_URL = "https://stock-backend-g011.onrender.com"; 
 
-// --- [使用者要求] 詳細介面設定 (Rich UI) ---
+// --- 介面設定 (Rich UI) ---
 const ANALYSIS_CRITERIA = {
   fund: { 
     title: "基本面分析 (Fundamental)", 
@@ -14,13 +14,13 @@ const ANALYSIS_CRITERIA = {
     bgColor: "bg-blue-50",
     desc: "評估公司真實價值與長期競爭力",
     items: [
-      { label: "營收、獲利 (EPS)", desc: "檢視每股盈餘成長率與營收動能" },
+      { label: "營收、獲利 (EPS)", desc: "每股盈餘成長率與營收動能" },
       { label: "利潤率分析", desc: "毛利率 / 營業利益率 / 淨利率" },
       { label: "經營績效 (ROE/ROA)", desc: "股東權益報酬率與資產報酬率" },
-      { label: "現金流量 (FCF)", desc: "自由現金流是否充裕健康" },
-      { label: "財務結構", desc: "負債比率與流動性風險評估" },
-      { label: "護城河與競爭力", desc: "產業地位、定價權與技術門檻" },
-      { label: "未來成長性", desc: "新技術導入與產品線擴展潛力" }
+      { label: "現金流量 (FCF)", desc: "自由現金流是否充裕" },
+      { label: "財務結構", desc: "負債比率與流動性風險" },
+      { label: "護城河與競爭力", desc: "產業地位與定價權" },
+      { label: "未來成長性", desc: "新技術導入與產品線擴展" }
     ]
   },
   tech: { 
@@ -33,7 +33,7 @@ const ANALYSIS_CRITERIA = {
       { label: "K 線型態", desc: "晨星、吞噬、頭肩頂等反轉訊號" },
       { label: "均線系統 (MA)", desc: "5日、20日、60日、120日線排列" },
       { label: "MACD 指標", desc: "趨勢強弱與多空轉折 (DIF/DEM)" },
-      { label: "RSI 相對強弱", desc: "判斷超買(>70)或超賣(<30)區間" },
+      { label: "RSI 相對強弱", desc: "判斷超買或超賣區間" },
       { label: "KD 隨機指標", desc: "短線轉折訊號 (K值/D值)" },
       { label: "布林通道", desc: "股價波動範圍與壓縮突破" },
       { label: "成交量能", desc: "量價關係 (量縮整理/爆量突破)" }
@@ -60,12 +60,12 @@ const ANALYSIS_CRITERIA = {
     bgColor: "bg-green-50", 
     desc: "解讀市場情緒與宏觀環境影響",
     items: [
-      { label: "重大公司新聞", desc: "財報公佈、法說會、產品發表、併購" },
-      { label: "宏觀經濟指標", desc: "利率、通膨、美元指數、美債殖利率" },
+      { label: "重大公司新聞", desc: "財報公佈、法說會、併購案" },
+      { label: "宏觀經濟指標", desc: "利率、通膨 (CPI)、美債殖利率" },
       { label: "政策與法規", desc: "政府補貼、產業禁令、稅收政策" },
-      { label: "AI 與科技趨勢", desc: "新科技浪潮與市場情緒" },
-      { label: "國際局勢", desc: "戰爭、疫情、供應鏈事件影響" },
-      { label: "社群情緒", desc: "新聞熱度與恐懼貪婪指數" }
+      { label: "AI 與科技趨勢", desc: "新科技浪潮與產業革命" },
+      { label: "國際地緣政治", desc: "戰爭、供應鏈中斷風險" },
+      { label: "市場情緒指數", desc: "恐懼與貪婪指數 (Fear & Greed)" }
     ]
   }
 };
@@ -168,12 +168,11 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
     const data = await fetchWithRetry({ ticker, principal, risk });
     
     const historyPrices = data.chart_data.history_price;
-    // [資料標準化] 解決電腦/手機分數不一致問題：
-    // 無論後端回傳 100 筆還是 200 筆，我們只取「最後 60 筆」進行即時運算
+    // 標準化數據長度，確保運算一致
     const calcPrices = historyPrices.slice(-60);
     const techDetails = calculateDetailedTechnicals(calcPrices);
     
-    // 技術面評分 (基於標準化後的真實運算)
+    // 技術面評分 (基於真實運算)
     let techScore = 50;
     if (techDetails) {
         if (techDetails.rsi > 70) techScore = 85;
@@ -328,13 +327,12 @@ const DetailModal = ({ aspectKey, data, onClose }) => {
             {config.items.map((item, idx) => (
               <div key={idx} className="flex items-start gap-3 p-3 rounded-xl hover:bg-gray-50 transition-colors group border border-transparent hover:border-gray-100">
                 <div className="mt-1">
-                  {/* 使用面向分數來概略判斷每個細項的狀態 */}
                   <CheckCircle2 className={`w-4 h-4 ${score >= 60 ? 'text-green-500' : 'text-gray-300'}`} />
                 </div>
                 <div>
                   <div className="text-sm font-bold text-gray-800 flex items-center gap-2">
                     {item.label}
-                    {/* 模擬該細項的狀態標籤，讓畫面更豐富 */}
+                    {/* 模擬該細項的狀態標籤 */}
                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${score >= 70 ? 'bg-green-100 text-green-700' : (score <= 40 ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-500')}`}>
                       {score >= 70 ? '優良' : (score <= 40 ? '偏弱' : '中性')}
                     </span>
@@ -355,7 +353,7 @@ const DetailModal = ({ aspectKey, data, onClose }) => {
   );
 };
 
-// --- AspectsGrid now accepts onClick ---
+// --- AspectsGrid ---
 const AspectsGrid = ({ scores, ticker, onAspectClick }) => {
   const getScoreColor = (s) => s >= 70 ? 'text-green-600' : (s <= 40 ? 'text-red-600' : 'text-yellow-600');
   const getBgHover = (s) => s >= 70 ? 'hover:bg-green-50 hover:border-green-200' : (s <= 40 ? 'hover:bg-red-50 hover:border-red-200' : 'hover:bg-yellow-50 hover:border-yellow-200');
@@ -859,7 +857,3 @@ export default function App() {
     </div>
   );
 }
-    </div>
-  );
-}
-
