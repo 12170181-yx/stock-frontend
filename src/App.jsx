@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, ReferenceLine } from 'recharts';
-import { TrendingUp, Activity, BarChart2, PieChart, Newspaper, Zap, Search, ShieldCheck, Wifi, WifiOff, Target, RefreshCw, ExternalLink, HelpCircle, Star, Trash2, Bot, FileText, CheckCircle2, Wallet, PlusCircle, X, Database, Calculator, AlertTriangle, Scale, RotateCcw, Microscope } from 'lucide-react';
+import { TrendingUp, Activity, BarChart2, PieChart, Newspaper, Zap, Search, ShieldCheck, Wifi, WifiOff, Target, RefreshCw, ExternalLink, HelpCircle, Star, Trash2, Bot, FileText, CheckCircle2, Wallet, PlusCircle, X, Database, Calculator, AlertTriangle, Scale, RotateCcw, Microscope, Settings } from 'lucide-react';
 
-// ⚠️ 請確認這是您 Render 後端的網址
-const API_BASE_URL = "https://stock-backend-g011.onrender.com"; 
+// --- 預設後端網址 ---
+// ⚠️ 請注意：這只是預設值。如果您的 Render 網址不同，請在網頁上的設定欄位更改，或直接修改這裡。
+const DEFAULT_API_URL = "https://stock-backend-g011.onrender.com"; 
 
 // --- 介面與指標定義 ---
 const ANALYSIS_CRITERIA = {
@@ -117,15 +118,19 @@ const calculateDetailedTechnicals = (prices) => {
 };
 
 // --- 核心 API 連線與重試機制 ---
-const fetchWithRetry = async (payload, retries = 2) => {
+const fetchWithRetry = async (url, payload, retries = 2) => {
   for (let i = 0; i <= retries; i++) {
     try {
-      const res = await fetch(`${API_BASE_URL}/analyze`, {
+      const res = await fetch(`${url}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+          // 嘗試讀取錯誤訊息
+          const errText = await res.text();
+          throw new Error(`HTTP ${res.status}: ${errText}`);
+      }
       const data = await res.json();
       return data; 
     } catch (e) {
@@ -135,16 +140,16 @@ const fetchWithRetry = async (payload, retries = 2) => {
   }
 };
 
-const fetchDepthAnalysis = async (ticker, principal, risk) => {
+const fetchDepthAnalysis = async (apiUrl, ticker, principal, risk) => {
   const cleanTicker = ticker.toUpperCase();
   const twDate = getTaiwanDateString();
-  const cacheKey = `stock_final_v12_real_${cleanTicker}_${twDate}`; 
+  const cacheKey = `stock_real_v15_debug_${cleanTicker}_${twDate}`; 
   
   const cachedData = localStorage.getItem(cacheKey);
   if (cachedData) return { ...JSON.parse(cachedData), source: 'cached' };
 
   try {
-    const data = await fetchWithRetry({ ticker, principal, risk });
+    const data = await fetchWithRetry(apiUrl, { ticker, principal, risk });
     
     // --- 1. 技術面運算 (100% 真實 & 一致) ---
     const historyPrices = data.chart_data.history_price;
@@ -168,40 +173,35 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
 
     // --- 2. 其他面向 (後端真實數據) ---
     const backendDetails = data.details || {};
-    
-    // 嚴格取值函數：如果數據無效或為 0，回傳 null (不回傳 50)
     const getRealScore = (val) => (!isNaN(Number(val)) && Number(val) > 0) ? Number(val) : null;
 
     const fundVal = getRealScore(backendDetails.fund);
     const chipVal = getRealScore(backendDetails.chip);
     const newsVal = getRealScore(backendDetails.news);
 
-    // --- 3. 動態權重總分計算 (100% 真實) ---
-    // 只計算「有效」的分數，絕不填充假數據
+    // --- 3. 動態權重總分計算 ---
     let totalScoreSum = 0;
     let totalWeight = 0;
 
     if (isTechValid) {
-      totalScoreSum += techScore * 0.4; // 技術面權重 40%
+      totalScoreSum += techScore * 0.4;
       totalWeight += 0.4;
     }
     if (fundVal !== null) {
-      totalScoreSum += fundVal * 0.2; // 基本面權重 20%
+      totalScoreSum += fundVal * 0.2;
       totalWeight += 0.2;
     }
     if (chipVal !== null) {
-      totalScoreSum += chipVal * 0.2; // 籌碼面權重 20%
+      totalScoreSum += chipVal * 0.2;
       totalWeight += 0.2;
     }
     if (newsVal !== null) {
-      totalScoreSum += newsVal * 0.2; // 消息面權重 20%
+      totalScoreSum += newsVal * 0.2;
       totalWeight += 0.2;
     }
 
-    // 依據實際取得的權重，還原回 100 分制
     const finalScore = totalWeight > 0 ? Math.round(totalScoreSum / totalWeight) : 0;
 
-    // 收集缺失項目
     let missingSources = [];
     if (fundVal === null) missingSources.push('基本');
     if (chipVal === null) missingSources.push('籌碼');
@@ -216,7 +216,7 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
       dataDate: twDate,
       currentPrice: data.current_price,
       recPeriod: data.recommendation,
-      news_list: data.news_list || [], // 確保有新聞列表
+      news_list: data.news_list || [],
       chartData: {
           ...data.chart_data,
           history_price: data.chart_data.history_price,
@@ -225,23 +225,23 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
       historyEndIndex: data.chart_data.history_date.length - 1
     };
 
-    // 只有當至少有技術面數據時才快取
     if (isTechValid) {
         try { localStorage.setItem(cacheKey, JSON.stringify(result)); } catch (e) {}
     }
 
     return { ...result, source: 'real' };
+
   } catch (e) {
     throw e;
   }
 };
 
-const fetchRanking = async (strategy) => {
+const fetchRanking = async (apiUrl, strategy) => {
   try {
-    const res = await fetch(`${API_BASE_URL}/rankings`);
+    const res = await fetch(`${apiUrl}/rankings`);
     if(!res.ok) throw new Error();
     const data = await res.json();
-    return data; // 後端直接回傳陣列
+    return data; 
   } catch (e) {
     return [];
   }
@@ -256,7 +256,7 @@ const generateAICommentary = (data, strategy) => {
   else summary = `❄️ **${ticker}** 綜合評分 **${totalScore}分**，建議觀望。`;
 
   let details = [`📈 **技術面**：MA排列${scores.tech>=60?'強勢':'弱勢'}，RSI ${data.techDetails?.rsi}。`];
-  if (missingSources.length > 0) details.push(`ℹ️ **資料提示**：${missingSources.join('、')} 暫無數據，不計入總分。`);
+  if (missingSources && missingSources.length > 0) details.push(`ℹ️ **資料提示**：${missingSources.join('、')} 暫無數據，不計入總分。`);
   
   let strategyAnalysis = { title: "AI 策略", points: ["依據技術指標操作", "嚴設停損停利"] };
   return { summary, details, strategyAnalysis };
@@ -296,7 +296,7 @@ const DetailModal = ({ aspectKey, data, onClose }) => {
               <span className="text-sm font-normal text-gray-400 ml-1">/ 100</span>
             </div>
           ) : (
-            <div className="text-3xl font-bold text-gray-400 py-2">無數據 (N/A)</div>
+            <div className="text-3xl font-bold text-gray-400 py-2">無數據</div>
           )}
           
           {isTech && techDetails && (
@@ -410,7 +410,7 @@ const ScoreCircle = ({ score, source, dataDate, completeness }) => {
         />
       </svg>
       <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex gap-1 items-center">
-        <div className="bg-white rounded-full p-1 shadow-sm border border-green-100" title={source === 'cached' ? "數據來源：今日快取 (穩定)" : "數據來源：真實運算 (即時)"}>
+        <div className="bg-white rounded-full p-1 shadow-sm border border-green-100" title={source === 'cached' ? "數據來源：今日快取" : "數據來源：真實運算"}>
           {source === 'cached' ? <Database className="w-3 h-3 text-blue-500"/> : <ShieldCheck className="w-3 h-3 text-green-500" />}
         </div>
         {completeness < 100 && (
@@ -418,29 +418,6 @@ const ScoreCircle = ({ score, source, dataDate, completeness }) => {
              <Scale className="w-3 h-3 text-orange-600"/>
            </div>
         )}
-      </div>
-    </div>
-  );
-};
-
-const AICommentaryCard = ({ data, strategy }) => {
-  const commentary = generateAICommentary(data, strategy);
-  if (!commentary) return null;
-
-  return (
-    <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl p-5 mt-4 animate-fade-in-up shadow-sm">
-      <h4 className="text-sm font-bold text-indigo-800 flex items-center gap-2 mb-3">
-        <Bot className="w-5 h-5"/> 
-        AI 智能診斷報告 (100% Real)
-      </h4>
-      <div className="text-sm text-gray-800 mb-3 leading-relaxed" dangerouslySetInnerHTML={{__html: commentary.summary}} />
-      <div className="space-y-2 mb-4">
-        {commentary.details.map((detail, idx) => (
-          <div key={idx} className="flex items-start gap-2 text-xs text-gray-600 bg-white/60 p-2 rounded-lg">
-            <FileText className="w-3 h-3 mt-0.5 text-indigo-400 shrink-0"/>
-            <span dangerouslySetInnerHTML={{__html: detail}} />
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -560,6 +537,27 @@ const RiskAnalysisCard = ({ chartData, currentPrice, principal }) => {
   );
 };
 
+const MarketNewsSection = ({ ticker }) => {
+  const getSearchUrl = (term) => `https://www.google.com/search?q=${encodeURIComponent(term)}&tbm=nws`;
+  const newsTitle = ticker ? `${ticker} 即時新聞掃描` : "全球市場快訊";
+  const searchTerm = ticker ? `${ticker} stock news` : "Global stock market news";
+
+  return (
+    <div className={`bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mt-6`}>
+      <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+        <Newspaper className="w-5 h-5 text-purple-500" />
+        {newsTitle}
+        <a href={getSearchUrl(searchTerm)} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline ml-auto flex items-center gap-1">
+          前往 Google News 驗證 <ExternalLink className="w-3 h-3"/>
+        </a>
+      </h3>
+      <div className="p-4 bg-gray-50 rounded-lg text-center text-sm text-gray-500">
+        點擊上方連結以獲取 {ticker || "市場"} 的最新真實新聞來源。
+      </div>
+    </div>
+  );
+};
+
 // --- Main App ---
 export default function App() {
   const [formData, setFormData] = useState({ 
@@ -569,6 +567,9 @@ export default function App() {
     strategy: 'none', 
     period: 'mid' 
   });
+
+  // 設定一個可編輯的 API URL 狀態，預設為您提供的 Render 網址
+  const [apiUrl, setApiUrl] = useState(API_BASE_URL);
   
   const [analysisResult, setAnalysisResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -587,19 +588,21 @@ export default function App() {
     const savedPort = localStorage.getItem('myPortfolio');
     if (savedPort) setPortfolio(JSON.parse(savedPort));
     
-    fetchRanking('growth').then(setRankingList);
-  }, []);
+    // 初始化時嘗試抓取排行
+    fetchRanking(apiUrl, 'growth').then(setRankingList);
+  }, [apiUrl]); // 當 apiUrl 改變時重新抓取
 
   const handleAnalyze = async (tickerOverride) => {
     const targetTicker = tickerOverride || formData.ticker;
     if(!targetTicker) return;
     setLoading(true); setErrorMsg(''); setAnalysisResult(null); 
     try {
-      const res = await fetchDepthAnalysis(targetTicker, formData.principal, formData.risk);
+      const res = await fetchDepthAnalysis(apiUrl, targetTicker, formData.principal, formData.risk);
       setAnalysisResult(res);
     } catch (e) {
       console.error(e);
-      setErrorMsg("伺服器連線失敗或資料不足，請稍後再試。");
+      // 這裡會顯示具體的錯誤訊息 (e.g. HTTP 404, Failed to fetch)
+      setErrorMsg(`連線失敗: ${e.message}。請確認後端網址是否正確且主機運行中。`);
     } finally {
       setLoading(false);
     }
@@ -643,16 +646,20 @@ export default function App() {
         
         {/* Left Panel */}
         <div className="lg:col-span-8 space-y-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
             <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-              <ShieldCheck className="text-blue-600" /> AI 全能投資戰情室 Pro
+              <ShieldCheck className="text-blue-600" /> AI 全能投資戰情室 (Connection Debugger)
             </h1>
-            {analysisResult && (
-              <span className={`text-xs px-2 py-1 rounded border flex items-center gap-1 ${analysisResult.source === 'cached' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
-                {analysisResult.source === 'cached' ? <Database className="w-3 h-3"/> : <Wifi className="w-3 h-3"/>}
-                {analysisResult.source === 'cached' ? '已快取' : '連線中'}
-              </span>
-            )}
+            {/* 這裡加入了一個小型的設定區塊，讓您可以更改網址 */}
+            <div className="flex items-center gap-2 text-xs bg-white p-2 rounded border border-gray-200">
+               <Settings size={14} className="text-gray-400"/>
+               <input 
+                 value={apiUrl} 
+                 onChange={e=>setApiUrl(e.target.value)} 
+                 className="outline-none text-gray-600 w-48"
+                 placeholder="輸入後端 API 網址"
+               />
+            </div>
           </div>
 
           {/* Search Bar */}
@@ -711,7 +718,7 @@ export default function App() {
           {errorMsg && (
             <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-xl flex items-center gap-3">
               <WifiOff className="w-6 h-6 shrink-0" />
-              <div><div className="font-bold">發生錯誤</div><div className="text-sm">{errorMsg}</div></div>
+              <div><div className="font-bold">連線錯誤 (Debug Mode)</div><div className="text-sm">{errorMsg}</div></div>
             </div>
           )}
 
@@ -731,7 +738,27 @@ export default function App() {
                 </div>
               </div>
 
-              <AICommentaryCard data={analysisResult} strategy={formData.strategy} />
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mt-6">
+                  <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                    <Newspaper className="w-5 h-5 text-purple-500" />
+                    {analysisResult.ticker} 最新真實新聞
+                  </h3>
+                  <div className="space-y-3">
+                    {analysisResult.news_list && analysisResult.news_list.length > 0 ? (
+                      analysisResult.news_list.map((news, i) => (
+                        <a key={i} href={news.link} target="_blank" rel="noreferrer" className="block p-3 border rounded-lg hover:shadow-md transition-all text-decoration-none">
+                          <div className="text-sm font-bold text-gray-800 line-clamp-1">{news.title}</div>
+                          <div className="text-xs text-gray-400 mt-1 flex justify-between">
+                            <span>{news.publisher}</span>
+                            <span><ExternalLink size={12}/></span>
+                          </div>
+                        </a>
+                      ))
+                    ) : (
+                      <div className="text-center text-gray-400 text-sm">暫無相關新聞</div>
+                    )}
+                  </div>
+              </div>
 
               <div>
                  <h3 className="font-bold text-gray-800 text-sm mb-1 flex items-center gap-2 px-1"><Target className="w-4 h-4 text-blue-600"/> 深度面向分析 <span className="text-xs font-normal text-gray-400">(點擊卡片查看詳細指標)</span></h3>
@@ -774,29 +801,6 @@ export default function App() {
                     <Area type="monotone" dataKey="mean" stroke="#dc2626" strokeDasharray="5 5" fill="transparent" />
                   </AreaChart>
                 </ResponsiveContainer>
-              </div>
-
-              {/* 真實新聞區塊 */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mt-6">
-                <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                  <Newspaper className="w-5 h-5 text-purple-500" />
-                  {analysisResult.ticker} 最新真實新聞
-                </h3>
-                <div className="space-y-3">
-                  {analysisResult.news_list && analysisResult.news_list.length > 0 ? (
-                    analysisResult.news_list.map((news, i) => (
-                      <a key={i} href={news.link} target="_blank" rel="noreferrer" className="block p-3 border rounded-lg hover:shadow-md transition-all text-decoration-none">
-                        <div className="text-sm font-bold text-gray-800 line-clamp-1">{news.title}</div>
-                        <div className="text-xs text-gray-400 mt-1 flex justify-between">
-                          <span>{news.publisher}</span>
-                          <span><ExternalLink size={12}/></span>
-                        </div>
-                      </a>
-                    ))
-                  ) : (
-                    <div className="text-center text-gray-400 text-sm">暫無相關新聞</div>
-                  )}
-                </div>
               </div>
 
             </div>
