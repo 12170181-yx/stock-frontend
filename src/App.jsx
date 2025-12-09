@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, ReferenceLine } from 'recharts';
-import { TrendingUp, Activity, BarChart2, PieChart, Newspaper, Zap, Search, ShieldCheck, Wifi, WifiOff, Target, RefreshCw, ExternalLink, HelpCircle, Star, Trash2, Bot, FileText, CheckCircle2, Wallet, PlusCircle, X, Server, Lock, Database, Microscope, Scale, Calculator, AlertTriangle } from 'lucide-react';
+import { TrendingUp, Activity, BarChart2, PieChart, Newspaper, Zap, Search, ShieldCheck, Wifi, WifiOff, Target, RefreshCw, ExternalLink, HelpCircle, Star, Trash2, Bot, FileText, CheckCircle2, Wallet, PlusCircle, X, Database, Calculator, AlertTriangle, Scale, RotateCcw, Microscope } from 'lucide-react';
 
 // ⚠️ 請確認這是您 Render 後端的網址
 const API_BASE_URL = "https://stock-backend-g011.onrender.com"; 
 
-// --- 介面設定 (Rich UI) ---
+// --- 介面與指標定義 ---
 const ANALYSIS_CRITERIA = {
   fund: { 
     title: "基本面分析 (Fundamental)", 
@@ -16,11 +16,8 @@ const ANALYSIS_CRITERIA = {
     items: [
       { label: "營收、獲利 (EPS)", desc: "每股盈餘成長率與營收動能" },
       { label: "利潤率分析", desc: "毛利率 / 營業利益率 / 淨利率" },
-      { label: "經營績效 (ROE/ROA)", desc: "股東權益報酬率與資產報酬率" },
-      { label: "現金流量 (FCF)", desc: "自由現金流是否充裕" },
-      { label: "財務結構", desc: "負債比率與流動性風險" },
-      { label: "護城河與競爭力", desc: "產業地位與定價權" },
-      { label: "未來成長性", desc: "新技術導入與產品線擴展" }
+      { label: "經營績效 (ROE/ROA)", desc: "股東權益報酬率" },
+      { label: "本益比 (PE)", desc: "股價估值是否合理" }
     ]
   },
   tech: { 
@@ -30,13 +27,11 @@ const ANALYSIS_CRITERIA = {
     bgColor: "bg-purple-50", 
     desc: "透過量價走勢判斷進出場時機",
     items: [
-      { label: "K 線型態", desc: "晨星、吞噬、頭肩頂等反轉訊號" },
-      { label: "均線系統 (MA)", desc: "5日、20日、60日、120日線排列" },
-      { label: "MACD 指標", desc: "趨勢強弱與多空轉折 (DIF/DEM)" },
-      { label: "RSI 相對強弱", desc: "判斷超買或超賣區間" },
-      { label: "KD 隨機指標", desc: "短線轉折訊號 (K值/D值)" },
+      { label: "RSI 相對強弱", desc: "判斷超買(>70)或超賣(<30)" },
+      { label: "MACD 指標", desc: "趨勢強弱與多空轉折" },
+      { label: "均線系統 (MA)", desc: "5日/20日/60日線排列" },
       { label: "布林通道", desc: "股價波動範圍與壓縮突破" },
-      { label: "成交量能", desc: "量價關係 (量縮整理/爆量突破)" }
+      { label: "KD 隨機指標", desc: "短線轉折訊號" }
     ]
   },
   chip: { 
@@ -46,11 +41,8 @@ const ANALYSIS_CRITERIA = {
     bgColor: "bg-orange-50", 
     desc: "追蹤主力大戶與法人的資金動向",
     items: [
-      { label: "三大法人買賣超", desc: "外資、投信、自營商動向" },
-      { label: "主力進出", desc: "關鍵券商分點與大戶持股比" },
-      { label: "融資融券", desc: "散戶指標與軋空潛力 (券資比)" },
-      { label: "借券賣出", desc: "潛在空方壓力監控" },
-      { label: "股權分散度", desc: "集保戶數變化 (大戶vs散戶)" }
+      { label: "三大法人買賣超", desc: "外資、投信、自營商" },
+      { label: "成交量能", desc: "量價關係分析" }
     ]
   },
   news: { 
@@ -58,14 +50,10 @@ const ANALYSIS_CRITERIA = {
     icon: Newspaper, 
     color: "text-green-600", 
     bgColor: "bg-green-50", 
-    desc: "解讀市場情緒與宏觀環境影響",
+    desc: "解讀市場情緒與新聞",
     items: [
-      { label: "重大公司新聞", desc: "財報公佈、法說會、併購案" },
-      { label: "宏觀經濟指標", desc: "利率、通膨 (CPI)、美債殖利率" },
-      { label: "政策與法規", desc: "政府補貼、產業禁令、稅收政策" },
-      { label: "AI 與科技趨勢", desc: "新科技浪潮與產業革命" },
-      { label: "國際地緣政治", desc: "戰爭、供應鏈中斷風險" },
-      { label: "市場情緒指數", desc: "恐懼與貪婪指數 (Fear & Greed)" }
+      { label: "重大新聞", desc: "財報、法說會、產品發表" },
+      { label: "市場情緒", desc: "恐懼與貪婪指數" }
     ]
   }
 };
@@ -86,7 +74,7 @@ const getTaiwanDateString = () => {
   return twTime.toISOString().slice(0, 10);
 };
 
-// --- 真實技術指標運算 (前端即時計算 - 確保即時性) ---
+// --- 真實技術指標運算 (前端即時計算) ---
 const calcSMA = (data, period) => {
   if (data.length < period) return null;
   return data.slice(-period).reduce((a, b) => a + b, 0) / period;
@@ -104,13 +92,13 @@ const calculateDetailedTechnicals = (prices) => {
   const rs = gains / (losses || 1);
   const rsi = 100 - (100 / (1 + rs));
 
-  // Bollinger Bands (20, 2)
+  // Bollinger Bands
   const sma20 = calcSMA(prices, 20);
   const slice20 = prices.slice(-20);
   const variance = slice20.reduce((acc, val) => acc + Math.pow(val - sma20, 2), 0) / 20;
   const stdDev = Math.sqrt(variance);
   
-  // KD (近似值)
+  // KD (近似)
   const slice9 = prices.slice(-9);
   const high9 = Math.max(...slice9);
   const low9 = Math.min(...slice9);
@@ -139,15 +127,6 @@ const fetchWithRetry = async (payload, retries = 2) => {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      
-      // 完整性檢查：如果重要欄位是 0，視為資料缺失，觸發重試
-      if (!data.details || !data.details.fund || data.details.fund === 0) {
-        if (i < retries) {
-          console.warn(`資料不完整，第 ${i + 1} 次重試...`);
-          await new Promise(r => setTimeout(r, 1500));
-          continue;
-        }
-      }
       return data; 
     } catch (e) {
       if (i === retries) throw e;
@@ -159,7 +138,7 @@ const fetchWithRetry = async (payload, retries = 2) => {
 const fetchDepthAnalysis = async (ticker, principal, risk) => {
   const cleanTicker = ticker.toUpperCase();
   const twDate = getTaiwanDateString();
-  const cacheKey = `stock_real_v9_pro_${cleanTicker}_${twDate}`; 
+  const cacheKey = `stock_final_v12_real_${cleanTicker}_${twDate}`; 
   
   const cachedData = localStorage.getItem(cacheKey);
   if (cachedData) return { ...JSON.parse(cachedData), source: 'cached' };
@@ -167,63 +146,87 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
   try {
     const data = await fetchWithRetry({ ticker, principal, risk });
     
+    // --- 1. 技術面運算 (100% 真實 & 一致) ---
     const historyPrices = data.chart_data.history_price;
-    // 標準化數據長度，確保運算一致
-    const calcPrices = historyPrices.slice(-60);
+    const calcPrices = historyPrices.slice(-60); // 資料長度標準化
     const techDetails = calculateDetailedTechnicals(calcPrices);
     
-    // 技術面評分 (基於真實運算)
-    let techScore = 50;
+    let techScore = 0;
+    let isTechValid = false;
+
     if (techDetails) {
-        if (techDetails.rsi > 70) techScore = 85;
-        else if (techDetails.rsi < 30) techScore = 25;
-        else techScore = 50 + (techDetails.rsi - 50) * 0.5;
+        let score = 50;
+        if (techDetails.rsi > 70) score = 85;
+        else if (techDetails.rsi < 30) score = 25;
+        else score = 50 + (techDetails.rsi - 50) * 0.5;
         
-        if (Number(techDetails.price) > Number(techDetails.ma20)) techScore += 10;
-        if (Number(techDetails.ma20) > Number(techDetails.ma60)) techScore += 10;
-        techScore = Math.min(99, Math.max(1, Math.round(techScore)));
+        if (Number(techDetails.price) > Number(techDetails.ma20)) score += 10;
+        if (Number(techDetails.ma20) > Number(techDetails.ma60)) score += 10;
+        techScore = Math.min(99, Math.max(1, Math.round(score)));
+        isTechValid = true;
     }
 
-    // 其他面向 (後端真實數據)
+    // --- 2. 其他面向 (後端真實數據) ---
     const backendDetails = data.details || {};
-    const getStrictScore = (val) => (!isNaN(Number(val)) && Number(val) > 0) ? Number(val) : 50;
+    
+    // 嚴格取值函數：如果數據無效或為 0，回傳 null (不回傳 50)
+    const getRealScore = (val) => (!isNaN(Number(val)) && Number(val) > 0) ? Number(val) : null;
 
-    const fundVal = getStrictScore(backendDetails.fund);
-    const chipVal = getStrictScore(backendDetails.chip);
-    const newsVal = getStrictScore(backendDetails.news);
+    const fundVal = getRealScore(backendDetails.fund);
+    const chipVal = getRealScore(backendDetails.chip);
+    const newsVal = getRealScore(backendDetails.news);
 
-    // 總分計算
-    const finalScore = Math.round(
-      techScore * 0.4 +
-      fundVal * 0.2 +
-      chipVal * 0.2 +
-      newsVal * 0.2
-    );
+    // --- 3. 動態權重總分計算 (100% 真實) ---
+    // 只計算「有效」的分數，絕不填充假數據
+    let totalScoreSum = 0;
+    let totalWeight = 0;
 
+    if (isTechValid) {
+      totalScoreSum += techScore * 0.4; // 技術面權重 40%
+      totalWeight += 0.4;
+    }
+    if (fundVal !== null) {
+      totalScoreSum += fundVal * 0.2; // 基本面權重 20%
+      totalWeight += 0.2;
+    }
+    if (chipVal !== null) {
+      totalScoreSum += chipVal * 0.2; // 籌碼面權重 20%
+      totalWeight += 0.2;
+    }
+    if (newsVal !== null) {
+      totalScoreSum += newsVal * 0.2; // 消息面權重 20%
+      totalWeight += 0.2;
+    }
+
+    // 依據實際取得的權重，還原回 100 分制
+    const finalScore = totalWeight > 0 ? Math.round(totalScoreSum / totalWeight) : 0;
+
+    // 收集缺失項目
     let missingSources = [];
-    if (backendDetails.fund === 0) missingSources.push('基本');
-    if (backendDetails.chip === 0) missingSources.push('籌碼');
-    if (backendDetails.news === 0) missingSources.push('消息');
+    if (fundVal === null) missingSources.push('基本');
+    if (chipVal === null) missingSources.push('籌碼');
+    if (newsVal === null) missingSources.push('消息');
 
     const result = {
       ...data,
       totalScore: finalScore,
-      scores: { tech: techScore, fund: fundVal, chip: chipVal, news: newsVal },
+      scores: { tech: techScore, fund: fundVal || 0, chip: chipVal || 0, news: newsVal || 0 },
       missingSources,
       techDetails,
       dataDate: twDate,
       currentPrice: data.current_price,
       recPeriod: data.recommendation,
+      news_list: data.news_list || [], // 確保有新聞列表
       chartData: {
           ...data.chart_data,
-          history_price: data.chart_data.history_price, // 原始數據
+          history_price: data.chart_data.history_price,
           history_date: data.chart_data.history_date
       },
       historyEndIndex: data.chart_data.history_date.length - 1
     };
 
-    // 只有當資料完整時才快取，避免快取到壞資料
-    if (missingSources.length === 0) {
+    // 只有當至少有技術面數據時才快取
+    if (isTechValid) {
         try { localStorage.setItem(cacheKey, JSON.stringify(result)); } catch (e) {}
     }
 
@@ -233,17 +236,12 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
   }
 };
 
-// ... FetchRanking, Commentary helpers ...
 const fetchRanking = async (strategy) => {
   try {
-    const res = await fetch(`${API_BASE_URL}/screen`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ strategy })
-    });
+    const res = await fetch(`${API_BASE_URL}/rankings`);
     if(!res.ok) throw new Error();
     const data = await res.json();
-    return data.results;
+    return data; // 後端直接回傳陣列
   } catch (e) {
     return [];
   }
@@ -258,7 +256,7 @@ const generateAICommentary = (data, strategy) => {
   else summary = `❄️ **${ticker}** 綜合評分 **${totalScore}分**，建議觀望。`;
 
   let details = [`📈 **技術面**：MA排列${scores.tech>=60?'強勢':'弱勢'}，RSI ${data.techDetails?.rsi}。`];
-  if (missingSources.length > 0) details.push(`ℹ️ **資料校正**：${missingSources.join('、')}暫以中性計算。`);
+  if (missingSources.length > 0) details.push(`ℹ️ **資料提示**：${missingSources.join('、')} 暫無數據，不計入總分。`);
   
   let strategyAnalysis = { title: "AI 策略", points: ["依據技術指標操作", "嚴設停損停利"] };
   return { summary, details, strategyAnalysis };
@@ -275,7 +273,6 @@ const DetailModal = ({ aspectKey, data, onClose }) => {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in" onClick={onClose}>
       <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-scale-up" onClick={e=>e.stopPropagation()}>
-        {/* Header */}
         <div className={`p-4 border-b flex justify-between items-center ${config.bgColor}`}>
           <div className="flex items-center gap-2">
             <div className={`p-2 rounded-lg bg-white ${config.color}`}>
@@ -291,15 +288,17 @@ const DetailModal = ({ aspectKey, data, onClose }) => {
           </button>
         </div>
 
-        {/* Score Banner */}
         <div className="p-6 text-center border-b border-gray-100 bg-gradient-to-b from-white to-gray-50/50">
           <div className="text-sm text-gray-400 font-bold mb-1">面向評分</div>
-          <div className={`text-5xl font-black ${score >= 70 ? 'text-green-600' : (score <= 40 ? 'text-red-500' : 'text-yellow-500')}`}>
-            {score}
-            <span className="text-sm font-normal text-gray-400 ml-1">/ 100</span>
-          </div>
+          {score > 0 ? (
+            <div className={`text-5xl font-black ${score >= 70 ? 'text-green-600' : (score <= 40 ? 'text-red-500' : 'text-yellow-500')}`}>
+              {score}
+              <span className="text-sm font-normal text-gray-400 ml-1">/ 100</span>
+            </div>
+          ) : (
+            <div className="text-3xl font-bold text-gray-400 py-2">無數據 (N/A)</div>
+          )}
           
-          {/* 如果是技術面，顯示真實運算數據 */}
           {isTech && techDetails && (
             <div className="flex justify-center gap-4 mt-4 text-xs">
               <div className="bg-white px-3 py-1 rounded border border-gray-200 shadow-sm">
@@ -318,7 +317,6 @@ const DetailModal = ({ aspectKey, data, onClose }) => {
           )}
         </div>
 
-        {/* Detailed Items List */}
         <div className="p-4 max-h-[50vh] overflow-y-auto custom-scrollbar">
           <h4 className="text-xs font-bold text-gray-400 mb-3 uppercase tracking-wider px-2">
             詳細觀察項目 (Analysis Breakdown)
@@ -332,10 +330,11 @@ const DetailModal = ({ aspectKey, data, onClose }) => {
                 <div>
                   <div className="text-sm font-bold text-gray-800 flex items-center gap-2">
                     {item.label}
-                    {/* 模擬該細項的狀態標籤 */}
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${score >= 70 ? 'bg-green-100 text-green-700' : (score <= 40 ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-500')}`}>
-                      {score >= 70 ? '優良' : (score <= 40 ? '偏弱' : '中性')}
-                    </span>
+                    {score > 0 && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${score >= 70 ? 'bg-green-100 text-green-700' : (score <= 40 ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-500')}`}>
+                        {score >= 70 ? '優良' : (score <= 40 ? '偏弱' : '中性')}
+                        </span>
+                    )}
                   </div>
                   <div className="text-xs text-gray-500 mt-0.5">{item.desc}</div>
                 </div>
@@ -343,20 +342,15 @@ const DetailModal = ({ aspectKey, data, onClose }) => {
             ))}
           </div>
         </div>
-
-        {/* Footer Info */}
-        <div className="p-3 bg-gray-50 text-[10px] text-center text-gray-400 border-t border-gray-100">
-          {isTech ? "數據來源：即時運算 (100% Real-time)" : "數據來源：AI 綜合評估模型"}
-        </div>
       </div>
     </div>
   );
 };
 
-// --- AspectsGrid ---
+// --- Sub Components ---
 const AspectsGrid = ({ scores, ticker, onAspectClick }) => {
-  const getScoreColor = (s) => s >= 70 ? 'text-green-600' : (s <= 40 ? 'text-red-600' : 'text-yellow-600');
-  const getBgHover = (s) => s >= 70 ? 'hover:bg-green-50 hover:border-green-200' : (s <= 40 ? 'hover:bg-red-50 hover:border-red-200' : 'hover:bg-yellow-50 hover:border-yellow-200');
+  const getScoreColor = (s) => s >= 70 ? 'text-green-600' : (s > 0 && s <= 40 ? 'text-red-600' : (s === 0 ? 'text-gray-400' : 'text-yellow-600'));
+  const getBgHover = (s) => s >= 70 ? 'hover:bg-green-50 hover:border-green-200' : (s > 0 && s <= 40 ? 'hover:bg-red-50 hover:border-red-200' : 'hover:bg-yellow-50 hover:border-yellow-200');
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
@@ -377,7 +371,7 @@ const AspectsGrid = ({ scores, ticker, onAspectClick }) => {
           </div>
           <div className="flex items-end justify-between">
             <div className={`text-2xl font-bold leading-none ${getScoreColor(scores[key])}`}>
-              {scores[key]}
+              {scores[key] > 0 ? scores[key] : '--'}
             </div>
             <div className="text-[10px] text-gray-400 font-medium">點擊查看詳情</div>
           </div>
@@ -387,7 +381,6 @@ const AspectsGrid = ({ scores, ticker, onAspectClick }) => {
   );
 };
 
-// --- Sub Components ---
 const ScoreCircle = ({ score, source, dataDate, completeness }) => {
   const validScore = typeof score === 'number' ? score : 0;
   let colorClass = "text-yellow-500";
@@ -416,7 +409,6 @@ const ScoreCircle = ({ score, source, dataDate, completeness }) => {
           className="transition-all duration-1000 ease-out"
         />
       </svg>
-      {/* 狀態標籤區 */}
       <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex gap-1 items-center">
         <div className="bg-white rounded-full p-1 shadow-sm border border-green-100" title={source === 'cached' ? "數據來源：今日快取 (穩定)" : "數據來源：真實運算 (即時)"}>
           {source === 'cached' ? <Database className="w-3 h-3 text-blue-500"/> : <ShieldCheck className="w-3 h-3 text-green-500" />}
@@ -431,37 +423,34 @@ const ScoreCircle = ({ score, source, dataDate, completeness }) => {
   );
 };
 
-const TradeStrategyCard = ({ price, score, strategy }) => {
-  let stopLossPct = 0.1;
-  let takeProfitPct = 0.2;
-  let entryMultiplier = 1.0;
-  let strategyName = "一般波段";
+const AICommentaryCard = ({ data, strategy }) => {
+  const commentary = generateAICommentary(data, strategy);
+  if (!commentary) return null;
 
-  switch(strategy) {
-    case 'day_trade':
-      strategyName = "當沖快打";
-      stopLossPct = 0.02; 
-      takeProfitPct = 0.04; 
-      entryMultiplier = 1.0;
-      break;
-    case 'bottom':
-      strategyName = "左側抄底";
-      stopLossPct = 0.15; 
-      takeProfitPct = 0.30;
-      entryMultiplier = 0.97; 
-      break;
-    case 'value':
-      strategyName = "存股領息";
-      stopLossPct = 0.20; 
-      takeProfitPct = 0.50; 
-      entryMultiplier = 0.99; 
-      break;
-    default: 
-      strategyName = "波段操作";
-      stopLossPct = 0.1;
-      takeProfitPct = 0.2;
-      entryMultiplier = 1.0;
-  }
+  return (
+    <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl p-5 mt-4 animate-fade-in-up shadow-sm">
+      <h4 className="text-sm font-bold text-indigo-800 flex items-center gap-2 mb-3">
+        <Bot className="w-5 h-5"/> 
+        AI 智能診斷報告 (100% Real)
+      </h4>
+      <div className="text-sm text-gray-800 mb-3 leading-relaxed" dangerouslySetInnerHTML={{__html: commentary.summary}} />
+      <div className="space-y-2 mb-4">
+        {commentary.details.map((detail, idx) => (
+          <div key={idx} className="flex items-start gap-2 text-xs text-gray-600 bg-white/60 p-2 rounded-lg">
+            <FileText className="w-3 h-3 mt-0.5 text-indigo-400 shrink-0"/>
+            <span dangerouslySetInnerHTML={{__html: detail}} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const TradeStrategyCard = ({ price, score, strategy }) => {
+  const entryMultiplier = 1.0;
+  let strategyName = "一般波段";
+  let stopLossPct = 0.1; 
+  let takeProfitPct = 0.2; 
 
   const entryPrice = (price * entryMultiplier).toFixed(2);
   const stopLoss = (entryPrice * (1 - stopLossPct)).toFixed(2); 
@@ -500,7 +489,6 @@ const PositionSuggestionCard = ({ price, principal, score, ticker, onBuy }) => {
   const lots = Math.floor(maxAffordableShares / 1000); 
   const oddShares = maxAffordableShares % 1000; 
   const estimatedCost = Math.floor(maxAffordableShares * price);
-  const remainingCash = principal - estimatedCost;
 
   if (maxAffordableShares <= 0) {
     return (
@@ -572,52 +560,6 @@ const RiskAnalysisCard = ({ chartData, currentPrice, principal }) => {
   );
 };
 
-const MarketNewsSection = ({ ticker }) => {
-  const getSearchUrl = (term) => `https://www.google.com/search?q=${encodeURIComponent(term)}&tbm=nws`;
-  const newsTitle = ticker ? `${ticker} 即時新聞掃描` : "全球市場快訊";
-  const searchTerm = ticker ? `${ticker} stock news` : "Global stock market news";
-
-  return (
-    <div className={`bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mt-6`}>
-      <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-        <Newspaper className="w-5 h-5 text-purple-500" />
-        {newsTitle}
-        <a href={getSearchUrl(searchTerm)} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline ml-auto flex items-center gap-1">
-          前往 Google News 驗證 <ExternalLink className="w-3 h-3"/>
-        </a>
-      </h3>
-      <div className="p-4 bg-gray-50 rounded-lg text-center text-sm text-gray-500">
-        點擊上方連結以獲取 {ticker || "市場"} 的最新真實新聞來源。
-      </div>
-    </div>
-  );
-};
-
-const RoiSection = ({ roi, period }) => {
-  if (!roi) return null;
-  return (
-    <div className="md:col-span-2 bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-      <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-        <DollarSign className="w-4 h-4 text-yellow-500"/> 真實獲利預估 (ROI)
-      </h3>
-      <div className="grid grid-cols-3 gap-3">
-        {['short', 'mid', 'long'].map(k => {
-          const item = roi[k];
-          if (!item) return null;
-          const isHighlighted = k === period;
-          return (
-            <div key={k} className={`p-3 rounded-lg text-center border ${isHighlighted ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-100' : 'bg-gray-50 border-transparent'} ${!isHighlighted && period !== 'none' ? 'opacity-40' : ''}`}>
-              <div className="text-xs text-gray-500 mb-1 font-bold">{k==='short'?'短期':(k==='mid'?'中期':'長期')}</div>
-              <div className={`text-lg font-bold ${item.return_pct>=0?'text-red-500':'text-green-500'}`}>{item.return_pct}%</div>
-              <div className="text-xs text-gray-400">賺 {item.profit_cash.toLocaleString()}</div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
 // --- Main App ---
 export default function App() {
   const [formData, setFormData] = useState({ 
@@ -644,6 +586,7 @@ export default function App() {
     if (savedWatch) setWatchlist(JSON.parse(savedWatch));
     const savedPort = localStorage.getItem('myPortfolio');
     if (savedPort) setPortfolio(JSON.parse(savedPort));
+    
     fetchRanking('growth').then(setRankingList);
   }, []);
 
@@ -833,7 +776,29 @@ export default function App() {
                 </ResponsiveContainer>
               </div>
 
-              <MarketNewsSection ticker={analysisResult.ticker} />
+              {/* 真實新聞區塊 */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mt-6">
+                <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                  <Newspaper className="w-5 h-5 text-purple-500" />
+                  {analysisResult.ticker} 最新真實新聞
+                </h3>
+                <div className="space-y-3">
+                  {analysisResult.news_list && analysisResult.news_list.length > 0 ? (
+                    analysisResult.news_list.map((news, i) => (
+                      <a key={i} href={news.link} target="_blank" rel="noreferrer" className="block p-3 border rounded-lg hover:shadow-md transition-all text-decoration-none">
+                        <div className="text-sm font-bold text-gray-800 line-clamp-1">{news.title}</div>
+                        <div className="text-xs text-gray-400 mt-1 flex justify-between">
+                          <span>{news.publisher}</span>
+                          <span><ExternalLink size={12}/></span>
+                        </div>
+                      </a>
+                    ))
+                  ) : (
+                    <div className="text-center text-gray-400 text-sm">暫無相關新聞</div>
+                  )}
+                </div>
+              </div>
+
             </div>
           )}
         </div>
@@ -841,15 +806,56 @@ export default function App() {
         {/* Sidebar */}
         <div className="lg:col-span-4 space-y-6">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 h-[600px] flex flex-col overflow-hidden">
-             <div className="p-4 border-b border-gray-100 font-bold text-gray-700">自選觀察</div>
+             {/* Sidebar Tabs */}
+             <div className="flex border-b">
+                 <button onClick={()=>setSidebarTab('rank')} className={`flex-1 py-3 text-sm font-bold ${sidebarTab==='rank'?'text-blue-600 border-b-2 border-blue-600':'text-gray-400'}`}>排行</button>
+                 <button onClick={()=>setSidebarTab('portfolio')} className={`flex-1 py-3 text-sm font-bold ${sidebarTab==='portfolio'?'text-blue-600 border-b-2 border-blue-600':'text-gray-400'}`}>資產</button>
+                 <button onClick={()=>setSidebarTab('watch')} className={`flex-1 py-3 text-sm font-bold ${sidebarTab==='watch'?'text-blue-600 border-b-2 border-blue-600':'text-gray-400'}`}>自選</button>
+             </div>
+
              <div className="flex-1 overflow-y-auto p-4 space-y-2">
-               {watchlist.map(t => (
-                 <div key={t} className="flex justify-between p-3 border rounded-lg cursor-pointer hover:bg-gray-50" onClick={() => handleAnalyze(t)}>
-                   <span className="font-bold">{t}</span>
-                   <Trash2 className="w-4 h-4 text-gray-300 hover:text-red-500" onClick={(e) => {e.stopPropagation(); toggleWatchlist(t);}}/>
-                 </div>
-               ))}
-               {watchlist.length === 0 && <div className="text-center text-gray-400 text-sm mt-10">尚無自選股</div>}
+               {/* 1. Ranking */}
+               {sidebarTab === 'rank' && (
+                   rankingList.length > 0 ? rankingList.map((item, i) => (
+                       <div key={i} onClick={()=>handleAnalyze(item.ticker)} className="flex justify-between items-center p-3 border rounded-xl hover:bg-gray-50 cursor-pointer">
+                           <div className="flex items-center gap-3">
+                               <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs text-white font-bold ${i<3?'bg-yellow-400':'bg-gray-300'}`}>{i+1}</div>
+                               <div>
+                                   <div className="font-bold text-gray-700">{item.ticker}</div>
+                                   <div className="text-xs text-gray-400">${item.price}</div>
+                               </div>
+                           </div>
+                           <div className={`font-bold ${item.score>=70?'text-green-600':'text-gray-600'}`}>{item.score}分</div>
+                       </div>
+                   )) : <div className="text-center text-gray-400 mt-10">排行載入中...</div>
+               )}
+
+               {/* 2. Portfolio */}
+               {sidebarTab === 'portfolio' && (
+                   portfolio.length > 0 ? portfolio.map((p, i) => (
+                       <div key={i} className="p-3 border rounded-xl bg-gray-50 relative">
+                           <div className="flex justify-between mb-1">
+                               <span className="font-bold">{p.ticker}</span>
+                               <span className="text-xs text-gray-500">{p.date}</span>
+                           </div>
+                           <div className="flex justify-between items-end">
+                               <span className="text-xs text-gray-500">{p.shares}股 @ ${p.price}</span>
+                               <span className="font-bold text-gray-700">${(p.price*p.shares).toLocaleString()}</span>
+                           </div>
+                           <button onClick={()=>removePosition(i)} className="absolute top-2 right-2 text-gray-300 hover:text-red-500"><X size={14}/></button>
+                       </div>
+                   )) : <div className="text-center text-gray-400 mt-10 flex flex-col items-center"><Wallet className="w-8 h-8 mb-2 opacity-50"/>尚無持倉</div>
+               )}
+
+               {/* 3. Watchlist */}
+               {sidebarTab === 'watch' && (
+                   watchlist.length > 0 ? watchlist.map(t => (
+                        <div key={t} onClick={()=>handleAnalyze(t)} className="flex justify-between items-center p-3 border rounded-xl hover:bg-gray-50 cursor-pointer">
+                            <span className="font-bold">{t}</span>
+                            <button onClick={e=>{e.stopPropagation(); toggleWatchlist(t)}}><Trash2 className="w-4 h-4 text-gray-300 hover:text-red-500"/></button>
+                        </div>
+                   )) : <div className="text-center text-gray-400 mt-10">尚無自選股</div>
+               )}
              </div>
           </div>
         </div>
