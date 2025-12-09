@@ -20,7 +20,7 @@ const PERIODS = {
   long: { label: '長期 (1年)', days: 250 }
 };
 
-// --- API 連線函數 ---
+// --- API 連線函數 (嚴格模式：僅真實資料) ---
 
 // 1. 單股深度分析
 const fetchDepthAnalysis = async (ticker, principal, risk) => {
@@ -37,7 +37,7 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
     });
     clearTimeout(timeoutId);
 
-    if(!res.ok) throw new Error("連線失敗");
+    if(!res.ok) throw new Error("伺服器回應錯誤");
     const data = await res.json();
     if(data.error) throw new Error(data.error);
     
@@ -47,9 +47,15 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
       totalScore: data.total_score,
       currentPrice: data.current_price,
       recPeriod: data.recommendation,
-      scores: data.details || { tech: 50, fund: 50, chip: 50, news: 50 } 
+      // 若後端沒給細項分數，給予 0 分提示異常，而不是 50 分
+      scores: data.details || { tech: 0, fund: 0, chip: 0, news: 0 } 
     };
     
+    // 若後端回傳的圖表資料有缺，進行基本防護
+    if (!data.chart_data || !data.chart_data.history_date) {
+        throw new Error("圖表資料缺失");
+    }
+
     const historyData = data.chart_data.history_date.map((d, i) => ({
       date: d, price: data.chart_data.history_price[i], type: 'history'
     }));
@@ -67,11 +73,12 @@ const fetchDepthAnalysis = async (ticker, principal, risk) => {
       ...mappedData,
       chartData: [...historyData, bridge, ...forecastData],
       historyEndIndex: historyData.length - 1,
-      source: 'real'
+      source: 'real' // 這裡永遠只會是 real
     };
   } catch (e) {
-    console.warn("分析失敗或切換模擬", e);
-    return mockAnalysis(ticker, principal, risk);
+    console.error("連線失敗:", e);
+    // 直接拋出錯誤，觸發 UI 顯示錯誤訊息，絕不切換模擬
+    throw e; 
   }
 };
 
@@ -89,74 +96,16 @@ const fetchRanking = async (strategy) => {
     });
     clearTimeout(timeoutId);
 
-    if(!res.ok) throw new Error();
+    if(!res.ok) throw new Error("Ranking fetch failed");
     const data = await res.json();
     return data.results;
   } catch (e) {
-    return mockRanking(strategy);
+    console.warn("排名取得失敗", e);
+    return []; // 失敗回傳空陣列，不造假數據
   }
 };
 
-// --- 模擬數據 ---
-const mockAnalysis = (ticker, principal, risk) => {
-  return new Promise(r => setTimeout(() => {
-    // 產生模擬的股價走勢
-    const historyDays = 30;
-    const history = Array.from({length: historyDays}, (_, i) => ({
-      date: `T-${historyDays-i}`, 
-      price: 100 + Math.random() * 20 - 10, 
-      type: 'history'
-    }));
-    
-    const lastPrice = history[history.length - 1].price;
-    
-    // 產生模擬預測
-    const forecastDays = 10;
-    const forecast = Array.from({length: forecastDays}, (_, i) => ({
-      date: `T+${i+1}`,
-      mean: lastPrice * (1 + 0.01 * (i+1)),
-      upper: lastPrice * (1 + 0.03 * (i+1)),
-      lower: lastPrice * (1 - 0.03 * (i+1)),
-      type: 'forecast'
-    }));
-
-    const bridge = { ...history[history.length-1], mean: lastPrice, upper: lastPrice, lower: lastPrice, type: 'forecast' };
-
-    r({
-      source: 'simulated',
-      ticker: ticker || "MOCK.TW",
-      currentPrice: parseFloat(lastPrice.toFixed(2)),
-      totalScore: 75,
-      evaluation: "偏多 (模擬)",
-      recPeriod: "長期持有",
-      scores: {tech: 80, fund: 70, chip: 60, news: 50},
-      roi: {
-        short: {return_pct: 5.2, profit_cash: Math.round(principal * 0.052), final_amount: Math.round(principal * 1.052)}, 
-        mid: {return_pct: 15.5, profit_cash: Math.round(principal * 0.155), final_amount: Math.round(principal * 1.155)}, 
-        long: {return_pct: 30.1, profit_cash: Math.round(principal * 0.301), final_amount: Math.round(principal * 1.301)}
-      },
-      chartData: [...history, bridge, ...forecast],
-      historyEndIndex: history.length - 1
-    });
-  }, 1000));
-};
-
-const mockRanking = (strategy) => {
-  return Array.from({ length: 10 }, (_, i) => {
-    const isDecline = strategy === 'decline';
-    const baseScore = isDecline ? 40 : 80;
-    const score = Math.max(30, Math.min(99, baseScore + Math.floor(Math.random() * 30 - 15)));
-    const change = isDecline ? -(Math.random() * 5 + 1).toFixed(2) : (Math.random() * 5).toFixed(2);
-    
-    return {
-      ticker: isDecline ? ["INTC", "NKE", "TSLA", "SBUX", "1301.TW", "2603.TW", "6505.TW", "PFE", "BA", "MRNA"][i] : 
-                          ["NVDA", "2330.TW", "MSFT", "AAPL", "AMD", "2454.TW", "2317.TW", "PLTR", "AVGO", "META"][i],
-      price: Math.floor(Math.random() * 500 + 50),
-      change_pct: change,
-      score: score
-    };
-  }).sort((a, b) => b.score - a.score);
-};
+// --- 已移除 mockAnalysis 與 mockRanking 函數 ---
 
 // --- Helper Functions ---
 const generateAICommentary = (data, strategy) => {
@@ -677,6 +626,7 @@ export default function App() {
   const [rankingList, setRankingList] = useState([]);
   const [rankStrategy, setRankStrategy] = useState('growth');
   const [rankLoading, setRankLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState(null); // 新增錯誤訊息狀態
   
   // 狀態：Watchlist & Portfolio
   const [watchlist, setWatchlist] = useState([]);
@@ -725,7 +675,7 @@ export default function App() {
     const loadRank = async () => {
       setRankLoading(true);
       const list = await fetchRanking(rankStrategy);
-      setRankingList(list);
+      setRankingList(list || []); // 確保失敗時為空陣列
       setRankLoading(false);
     };
     loadRank();
@@ -756,19 +706,35 @@ export default function App() {
   const handleAnalyze = async () => {
     if(!formData.ticker) return;
     setLoading(true);
-    // 注意：後端只接收 risk，所以 strategy 和 period 雖然前端有分，傳給後端還是用 risk 代表
-    const res = await fetchDepthAnalysis(formData.ticker, formData.principal, formData.risk);
-    setAnalysisResult(res);
-    setLoading(false);
+    setErrorMsg(null); // 清除舊錯誤
+    setAnalysisResult(null); // 清除舊結果
+    
+    try {
+      const res = await fetchDepthAnalysis(formData.ticker, formData.principal, formData.risk);
+      setAnalysisResult(res);
+    } catch (e) {
+      setErrorMsg("⚠️ 連線失敗或伺服器無回應，請稍後再試。(模擬功能已停用)");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSelectStock = (ticker) => {
     setFormData(prev => ({ ...prev, ticker }));
+    // 自動觸發分析
     setLoading(true);
-    fetchDepthAnalysis(ticker, formData.principal, formData.risk).then(res => {
-        setAnalysisResult(res);
-        setLoading(false);
-    });
+    setErrorMsg(null);
+    setAnalysisResult(null);
+    
+    fetchDepthAnalysis(ticker, formData.principal, formData.risk)
+      .then(res => {
+          setAnalysisResult(res);
+          setLoading(false);
+      })
+      .catch(e => {
+          setErrorMsg("⚠️ 無法取得該股票數據，請確認代碼是否正確。");
+          setLoading(false);
+      });
   };
 
   const isWatched = watchlist.includes(formData.ticker.toUpperCase());
@@ -784,9 +750,10 @@ export default function App() {
             <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
               <TrendingUp className="text-blue-600" /> AI 投資戰情室
             </h1>
+            {/* 只顯示連線中，不再顯示模擬中 */}
             {analysisResult && (
-              <span className={`text-xs px-2 py-1 rounded border ${analysisResult.source==='real'?'bg-green-50 text-green-700 border-green-200':'bg-orange-50 text-orange-700 border-orange-200'}`}>
-                {analysisResult.source==='real'?'連線中':'模擬中'}
+              <span className="text-xs px-2 py-1 rounded border bg-green-50 text-green-700 border-green-200">
+                連線中
               </span>
             )}
           </div>
@@ -881,7 +848,15 @@ export default function App() {
             </div>
           </div>
 
-          {!analysisResult && !loading && (
+          {/* 錯誤訊息顯示區 */}
+          {errorMsg && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl animate-fade-in flex items-center gap-2">
+              <WifiOff className="w-5 h-5"/>
+              {errorMsg}
+            </div>
+          )}
+
+          {!analysisResult && !loading && !errorMsg && (
             <MarketNewsSection ticker={null} />
           )}
 
@@ -1013,11 +988,19 @@ export default function App() {
                       </button>
                     ))}
                   </div>
-                  <div className="space-y-1">
-                    {rankingList.map((stock, idx) => (
-                      <RankingItem key={idx} stock={stock} onClick={handleSelectStock} />
-                    ))}
-                  </div>
+                  
+                  {/* 排行榜錯誤處理 */}
+                  {rankingList.length === 0 && !rankLoading ? (
+                     <div className="text-center text-gray-400 text-xs py-8">
+                        暫無排行資料或連線失敗
+                     </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {rankingList.map((stock, idx) => (
+                        <RankingItem key={idx} stock={stock} onClick={handleSelectStock} />
+                      ))}
+                    </div>
+                  )}
                 </>
               )}
 
