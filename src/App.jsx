@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import { ShieldCheck, TrendingUp, PieChart, BarChart2, Newspaper, User, LogOut, Search, PlusCircle, Trash2, Wallet, Activity, AlertTriangle, Target, Calculator, Star, X, CheckCircle2, Lock, ArrowRight, ExternalLink, Settings, BarChart, Scale } from 'lucide-react';
 
-// ⚠️ 設定後端 API 網址 (請確認您的 Render 網址)
+// ⚠️ 設定後端 API 網址
 const DEFAULT_API_URL = "https://stock-backend-g011.onrender.com"; 
 
 // --- SRS 靜態定義: 四大面向詳細指標 ---
@@ -47,97 +47,12 @@ const ANALYSIS_CRITERIA = {
   }
 };
 
-// --- 組件：登入畫面 (SRS #13) ---
-const LoginView = ({ onLogin, apiUrl, setApiUrl }) => {
-  const [isReg, setIsReg] = useState(false);
-  const [u, setU] = useState('');
-  const [p, setP] = useState('');
-  const [err, setErr] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-
-  const submit = async (e) => {
-    e.preventDefault();
-    setErr('');
-    setLoading(true);
-    const url = isReg ? '/auth/register' : '/auth/login';
-    const cleanUrl = apiUrl.replace(/\/$/, "");
-
-    try {
-      const body = isReg 
-        ? JSON.stringify({ username: u, password: p }) 
-        : new URLSearchParams({ username: u, password: p });
-      
-      const headers = isReg 
-        ? {'Content-Type': 'application/json'} 
-        : {'Content-Type': 'application/x-www-form-urlencoded'};
-
-      const res = await fetch(`${cleanUrl}${url}`, { method: 'POST', headers, body });
-      
-      if (!res.ok) {
-          const errorData = await res.json().catch(()=>({}));
-          throw new Error(errorData.detail || `伺服器錯誤 (${res.status})`);
-      }
-      
-      if (isReg) { 
-          alert("註冊成功，請登入"); 
-          setIsReg(false); 
-      } else { 
-          const data = await res.json(); 
-          onLogin(data.access_token, u); 
-      }
-    } catch (e) { 
-        setErr(e.message === "Failed to fetch" ? "無法連線至伺服器，請檢查網址或稍後再試" : e.message); 
-    } finally { 
-        setLoading(false); 
-    }
-  };
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 relative">
-      <button onClick={() => setShowSettings(!showSettings)} className="absolute top-4 right-4 p-2 bg-white rounded-full shadow-sm text-gray-400 hover:text-gray-600">
-        <Settings size={20} />
-      </button>
-
-      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm border border-gray-100">
-        <div className="text-center mb-6">
-          <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3">
-             <ShieldCheck className="w-8 h-8 text-blue-600"/>
-          </div>
-          <h2 className="text-xl font-bold text-gray-800">AI 全能投資戰情室</h2>
-          <p className="text-sm text-gray-500 mt-1">SRS v2.0 - 完整功能版</p>
-        </div>
-
-        {showSettings && (
-            <div className="mb-4 p-3 bg-gray-50 rounded-xl border border-gray-200">
-                <label className="text-xs font-bold text-gray-500 block mb-1">API 伺服器</label>
-                <input value={apiUrl} onChange={e => setApiUrl(e.target.value)} className="w-full p-2 text-xs border rounded bg-white" />
-            </div>
-        )}
-
-        {err && <div className="bg-red-50 text-red-600 p-3 text-sm rounded-lg mb-4 flex items-center gap-2"><AlertTriangle size={14}/> {err}</div>}
-        
-        <form onSubmit={submit} className="space-y-4">
-          <input className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="使用者帳號" value={u} onChange={e=>setU(e.target.value)} required/>
-          <input className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" type="password" placeholder="密碼" value={p} onChange={e=>setP(e.target.value)} required/>
-          <button disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:bg-gray-300">
-            {loading ? "處理中..." : (isReg ? "註冊新帳號" : "登入系統")}
-          </button>
-        </form>
-        <button onClick={()=>setIsReg(!isReg)} className="w-full text-center text-sm text-gray-500 mt-6 hover:text-blue-600">
-          {isReg ? "已有帳號? 返回登入" : "還沒有帳號? 點此註冊"}
-        </button>
-      </div>
-    </div>
-  );
-};
-
 // --- 組件：詳細視窗 (SRS #15) ---
 const DetailModal = ({ aspectKey, data, onClose }) => {
   if (!data) return null;
   const config = ANALYSIS_CRITERIA[aspectKey];
   const score = data.scores[aspectKey];
-  const tech = data.tech_details || {}; // 後端傳來的真實指標
+  const tech = data.tech_details || {}; 
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in" onClick={onClose}>
@@ -181,10 +96,10 @@ const DetailModal = ({ aspectKey, data, onClose }) => {
   );
 };
 
-// --- 主程式 ---
+// --- 主程式 (無登入版) ---
 export default function App() {
-  const [token, setToken] = useState(localStorage.getItem('token'));
-  const [user, setUser] = useState(localStorage.getItem('user'));
+  // 移除 Token 相關狀態，預設已登入
+  const [user, setUser] = useState("Guest");
   const [apiUrl, setApiUrl] = useState(localStorage.getItem('custom_api_url') || DEFAULT_API_URL);
 
   const [view, setView] = useState('analysis'); // analysis, portfolio, watchlist
@@ -198,41 +113,43 @@ export default function App() {
   const [favorites, setFavorites] = useState([]);
   const [portfolio, setPortfolio] = useState([]);
   const [modal, setModal] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
 
-  // --- API 封裝 (處理 Token) ---
-  const authFetch = async (endpoint, opts={}) => {
+  // --- API Fetch (直接呼叫，不帶 Token) ---
+  const apiFetch = async (endpoint, opts={}) => {
     const cleanUrl = apiUrl.replace(/\/$/, "");
-    const headers = { ...opts.headers, 'Authorization': `Bearer ${token}` };
     try {
-        const res = await fetch(`${cleanUrl}${endpoint}`, { ...opts, headers });
-        if (res.status === 401) { logout(); return null; }
+        const res = await fetch(`${cleanUrl}${endpoint}`, { ...opts });
+        // 注意：如果後端仍強制驗證 Token，這裡會收到 401 錯誤
+        if (res.status === 401) { 
+            console.warn("後端要求登入，但目前處於免登入模式。請確認後端是否已關閉驗證。");
+            return null; 
+        }
         return res;
-    } catch(e) { throw e; }
-  };
-
-  const logout = () => {
-    localStorage.removeItem('token'); localStorage.removeItem('user');
-    setToken(null); setUser(null);
-  };
-
-  useEffect(() => {
-    if (token) {
-      loadUserData();
-      authFetch('/api/rankings').then(r => r && r.ok && r.json().then(setRanking));
+    } catch(e) {
+        throw e;
     }
-  }, [token, apiUrl]);
+  };
+
+  // 初始化資料
+  useEffect(() => {
+    // 嘗試載入資料 (如果後端允許匿名訪問)
+    loadUserData();
+    apiFetch('/api/rankings').then(r => r && r.ok && r.json().then(setRanking));
+  }, [apiUrl]);
 
   const loadUserData = () => {
-      authFetch('/api/favorites').then(r=>r && r.ok && r.json().then(setFavorites));
-      authFetch('/api/portfolio').then(r=>r && r.ok && r.json().then(setPortfolio));
+      // 嘗試讀取，失敗則忽略 (因為沒登入可能拿不到 User Data)
+      apiFetch('/api/favorites').then(r=>r && r.ok && r.json().then(setFavorites)).catch(e => console.log("無法載入收藏 (可能需登入)"));
+      apiFetch('/api/portfolio').then(r=>r && r.ok && r.json().then(setPortfolio)).catch(e => console.log("無法載入資產 (可能需登入)"));
   };
 
   const handleAnalyze = async (target) => {
     const t = target || ticker;
     if (!t) return;
-    setLoading(true); setErrorMsg('');
+    setLoading(true); setErrorMsg(''); setData(null);
     try {
-      const res = await authFetch('/api/analyze', {
+      const res = await apiFetch('/api/analyze', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ symbol: t, principal: Number(principal) })
@@ -244,7 +161,7 @@ export default function App() {
         setView('analysis');
       } else {
         const err = await res.json().catch(()=>({}));
-        setErrorMsg(err.detail || "分析失敗 (請確認代碼)");
+        setErrorMsg(err.detail || "分析失敗，請檢查代碼或後端狀態");
       }
     } catch(e) { setErrorMsg("連線錯誤 (請確認後端)"); } 
     finally { setLoading(false); }
@@ -253,43 +170,64 @@ export default function App() {
   const toggleFav = async (sym) => {
     if(!sym) return;
     const method = favorites.includes(sym) ? 'DELETE' : 'POST';
-    await authFetch(`/api/favorites/${sym}`, { method });
-    loadUserData();
+    const res = await apiFetch(`/api/favorites/${sym}`, { method });
+    if (res && res.ok) {
+        // 如果後端有回傳新列表最好，沒有則手動更新前端狀態 (模擬)
+        try {
+            const newList = await res.json();
+            setFavorites(Array.isArray(newList) ? newList : []); 
+        } catch {
+             // Fallback for demo
+             setFavorites(prev => method === 'POST' ? [...prev, sym] : prev.filter(x => x !== sym));
+        }
+    } else {
+        // 本地模擬
+        setFavorites(prev => method === 'POST' ? [...prev, sym] : prev.filter(x => x !== sym));
+    }
   };
 
   const addToPort = async () => {
     if (!data) return;
     const shares = Math.floor(principal / data.current_price);
-    await authFetch('/api/portfolio/add', {
+    const item = { 
+        symbol: data.symbol, 
+        cost_price: data.current_price, 
+        shares, 
+        date: new Date().toISOString().split('T')[0] 
+    };
+
+    const res = await apiFetch('/api/portfolio/add', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ 
-          symbol: data.symbol, 
-          cost_price: data.current_price, 
-          shares, 
-          date: new Date().toISOString().split('T')[0] 
-      })
+      body: JSON.stringify(item)
     });
-    alert(`已將 ${data.symbol} 加入模擬倉`);
-    loadUserData();
+
+    if (res && res.ok) {
+        alert(`已將 ${data.symbol} 加入資產`);
+        loadUserData();
+    } else {
+        // 本地模擬添加
+        setPortfolio(prev => [...prev, item]);
+        alert(`(本地模擬) 已將 ${data.symbol} 加入資產`);
+    }
   };
 
   const removePort = async (sym) => {
-    await authFetch(`/api/portfolio/${sym}`, { method: 'DELETE' });
-    loadUserData();
+    const res = await apiFetch(`/api/portfolio/${sym}`, { method: 'DELETE' });
+    if (res && res.ok) {
+        loadUserData();
+    } else {
+        // 本地模擬刪除
+        setPortfolio(prev => prev.filter(p => p.symbol !== sym));
+    }
   };
-
-  if (!token) return <LoginView onLogin={(t, u) => { 
-      setToken(t); setUser(u); 
-      localStorage.setItem('token', t); localStorage.setItem('user', u); 
-  }} apiUrl={apiUrl} setApiUrl={(url)=>{setApiUrl(url); localStorage.setItem('custom_api_url', url);}} />;
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-gray-900 pb-20 lg:pb-0">
       {modal && <DetailModal aspectKey={modal} data={data} onClose={()=>setModal(null)} />}
 
       <nav className="bg-white px-4 py-3 border-b flex justify-between items-center sticky top-0 z-20 shadow-sm">
-        <div className="font-bold text-lg flex items-center gap-2"><ShieldCheck className="text-blue-600"/> 戰情室 <span className="text-[10px] bg-gray-100 text-gray-500 px-1 rounded border">PRO</span></div>
+        <div className="font-bold text-lg flex items-center gap-2"><ShieldCheck className="text-blue-600"/> 戰情室 <span className="text-[10px] bg-gray-100 text-gray-500 px-1 rounded border">免登入版</span></div>
         <div className="hidden lg:flex gap-1 text-sm font-bold bg-gray-100 p-1 rounded-lg">
           {['analysis', 'portfolio', 'watchlist'].map(v => (
               <button key={v} onClick={()=>setView(v)} className={`px-4 py-1.5 rounded-md transition-all ${view===v ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
@@ -298,10 +236,27 @@ export default function App() {
           ))}
         </div>
         <div className="flex items-center gap-3">
+            <button onClick={() => setShowSettings(!showSettings)} className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600"><Settings size={18}/></button>
             <span className="text-xs font-bold text-gray-500 hidden sm:block">Hi, {user}</span>
-            <button onClick={logout} className="p-2 hover:bg-red-50 rounded-full text-gray-400 hover:text-red-500"><LogOut size={18}/></button>
         </div>
       </nav>
+
+      {/* Settings Panel */}
+      {showSettings && (
+          <div className="bg-gray-100 p-4 border-b">
+              <div className="max-w-6xl mx-auto flex items-center gap-2">
+                  <label className="text-xs font-bold text-gray-600">API URL:</label>
+                  <input 
+                      value={apiUrl} 
+                      onChange={e => {
+                          setApiUrl(e.target.value);
+                          localStorage.setItem('custom_api_url', e.target.value);
+                      }} 
+                      className="flex-1 p-2 text-xs border rounded bg-white" 
+                  />
+              </div>
+          </div>
+      )}
 
       <div className="max-w-7xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-6">
         
@@ -410,7 +365,7 @@ export default function App() {
 
                   {/* SRS #2 新聞 */}
                   <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-                      <h3 className="font-bold text-gray-700 text-sm mb-3 flex items-center gap-2"><Newspaper size={16}/> 真實新聞</h3>
+                      <h3 className="font-bold text-gray-700 text-sm mb-3 flex items-center gap-2"><Newspaper size={16}/> 真實新聞快訊</h3>
                       <div className="space-y-3">
                           {data.news_list && data.news_list.length > 0 ? data.news_list.map((n,i)=>(
                               <a key={i} href={n.link} target="_blank" rel="noreferrer" className="block p-3 border rounded-xl hover:shadow-md transition bg-gray-50/50 hover:bg-white text-decoration-none">
