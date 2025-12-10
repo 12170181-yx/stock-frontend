@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
-import { ShieldCheck, TrendingUp, PieChart, BarChart2, Newspaper, User, LogOut, Search, PlusCircle, Trash2, Wallet, Activity, AlertTriangle, Target, Calculator, Star, X, CheckCircle2, Lock, ArrowRight, ExternalLink } from 'lucide-react';
+import { ShieldCheck, TrendingUp, PieChart, BarChart2, Newspaper, User, LogOut, Search, PlusCircle, Trash2, Wallet, Activity, AlertTriangle, Target, Calculator, Star, X, CheckCircle2, Lock, ArrowRight, ExternalLink, Settings } from 'lucide-react';
 
-// ⚠️ 請確認這是您 Render 後端的網址 (不需要加 /api)
-const API_BASE_URL = "https://stock-backend-g011.onrender.com"; 
+// 預設後端網址 (如果登入失敗，請在登入畫面右上角齒輪修改)
+const DEFAULT_API_URL = "https://stock-backend-g011.onrender.com"; 
 
 // --- 詳細分析項目定義 ---
 const ANALYSIS_CRITERIA = {
@@ -45,21 +45,25 @@ const ANALYSIS_CRITERIA = {
   }
 };
 
-// --- 登入畫面 ---
-const LoginView = ({ onLogin }) => {
+// --- 登入畫面 (含伺服器設定) ---
+const LoginView = ({ onLogin, apiUrl, setApiUrl }) => {
   const [isReg, setIsReg] = useState(false);
   const [u, setU] = useState('');
   const [p, setP] = useState('');
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
     setErr('');
     setLoading(true);
     const url = isReg ? '/auth/register' : '/auth/login';
+    
+    // 移除網址末端的斜線，避免雙斜線錯誤
+    const cleanBaseUrl = apiUrl.replace(/\/$/, "");
+
     try {
-      // 登入是用 Form Data，註冊是用 JSON
       const body = isReg 
         ? JSON.stringify({ username: u, password: p }) 
         : new URLSearchParams({ username: u, password: p });
@@ -68,11 +72,12 @@ const LoginView = ({ onLogin }) => {
         ? {'Content-Type': 'application/json'} 
         : {'Content-Type': 'application/x-www-form-urlencoded'};
 
-      const res = await fetch(`${API_BASE_URL}${url}`, { method: 'POST', headers, body });
+      const res = await fetch(`${cleanBaseUrl}${url}`, { method: 'POST', headers, body });
       
       if (!res.ok) {
+          // 嘗試解析 JSON 錯誤，若失敗則回傳狀態碼
           const errorData = await res.json().catch(()=>({}));
-          throw new Error(errorData.detail || "認證失敗");
+          throw new Error(errorData.detail || `伺服器錯誤 (${res.status})`);
       }
       
       if (isReg) { 
@@ -82,12 +87,22 @@ const LoginView = ({ onLogin }) => {
           const data = await res.json(); 
           onLogin(data.access_token, u); 
       }
-    } catch (e) { setErr(e.message); }
-    finally { setLoading(false); }
+    } catch (e) { 
+        setErr(e.message === "Failed to fetch" ? "無法連線至伺服器，請檢查網址或網路" : e.message); 
+    } finally { 
+        setLoading(false); 
+    }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 relative">
+      {/* 伺服器設定按鈕 */}
+      <div className="absolute top-4 right-4">
+         <button onClick={() => setShowSettings(!showSettings)} className="p-2 bg-white rounded-full shadow-sm text-gray-400 hover:text-gray-600 transition">
+            <Settings size={20} />
+         </button>
+      </div>
+
       <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm border border-gray-100">
         <div className="text-center mb-6">
           <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3">
@@ -96,12 +111,28 @@ const LoginView = ({ onLogin }) => {
           <h2 className="text-xl font-bold text-gray-800">AI 投資戰情室</h2>
           <p className="text-sm text-gray-500 mt-1">{isReg ? "建立您的 SRS 帳戶" : "登入以存取資產數據"}</p>
         </div>
+
+        {/* 伺服器設定面板 */}
+        {showSettings && (
+            <div className="mb-4 p-3 bg-gray-50 rounded-xl border border-gray-200">
+                <label className="text-xs font-bold text-gray-500 block mb-1">後端 API 網址</label>
+                <input 
+                    value={apiUrl} 
+                    onChange={e => setApiUrl(e.target.value)} 
+                    className="w-full p-2 text-xs border rounded bg-white" 
+                    placeholder="https://your-app.onrender.com"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">請輸入您在 Render 部署的完整網址</p>
+            </div>
+        )}
+
         {err && <div className="bg-red-50 text-red-600 p-3 text-sm rounded-lg mb-4 flex items-center gap-2"><AlertTriangle size={14}/> {err}</div>}
+        
         <form onSubmit={submit} className="space-y-4">
           <input className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="使用者帳號" value={u} onChange={e=>setU(e.target.value)} required/>
           <input className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition" type="password" placeholder="密碼" value={p} onChange={e=>setP(e.target.value)} required/>
           <button disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:bg-gray-300">
-            {loading ? "處理中..." : (isReg ? "註冊帳號" : "立即登入")}
+            {loading ? "連線中..." : (isReg ? "註冊帳號" : "立即登入")}
           </button>
         </form>
         <button onClick={()=>setIsReg(!isReg)} className="w-full text-center text-sm text-gray-500 mt-6 hover:text-blue-600 transition">
@@ -164,8 +195,10 @@ const DetailModal = ({ aspectKey, data, onClose }) => {
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [user, setUser] = useState(localStorage.getItem('user'));
+  // 從 LocalStorage 讀取自定義網址，若無則使用預設
+  const [apiUrl, setApiUrl] = useState(localStorage.getItem('custom_api_url') || DEFAULT_API_URL);
+
   const [view, setView] = useState('analysis');
-  
   const [ticker, setTicker] = useState('');
   const [principal, setPrincipal] = useState(100000);
   const [data, setData] = useState(null);
@@ -177,11 +210,18 @@ export default function App() {
   const [portfolio, setPortfolio] = useState([]);
   const [modal, setModal] = useState(null);
 
-  // Auth Fetch Wrapper
+  // 更新網址時同步存入 LocalStorage
+  const updateApiUrl = (url) => {
+      setApiUrl(url);
+      localStorage.setItem('custom_api_url', url);
+  };
+
+  // Auth Fetch Wrapper (使用動態 apiUrl)
   const authFetch = async (endpoint, opts={}) => {
+    const cleanBaseUrl = apiUrl.replace(/\/$/, "");
     const headers = { ...opts.headers, 'Authorization': `Bearer ${token}` };
     try {
-        const res = await fetch(`${API_BASE_URL}${endpoint}`, { ...opts, headers });
+        const res = await fetch(`${cleanBaseUrl}${endpoint}`, { ...opts, headers });
         if (res.status === 401) { logout(); return null; }
         return res;
     } catch(e) {
@@ -190,17 +230,20 @@ export default function App() {
   };
 
   const logout = () => {
-    localStorage.clear(); setToken(null); setUser(null);
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setToken(null); 
+    setUser(null);
   };
 
   // 初始化資料
   useEffect(() => {
     if (token) {
       loadUserData();
-      // 載入排行榜 (不用 token 也可以，但後端設計了 token 驗證)
+      // 載入排行榜
       authFetch('/api/rankings').then(r => r && r.ok && r.json().then(setRanking));
     }
-  }, [token]);
+  }, [token, apiUrl]); // apiUrl 變更時重新載入
 
   const loadUserData = () => {
       authFetch('/api/favorites').then(r=>r && r.ok && r.json().then(setFavorites));
@@ -210,7 +253,7 @@ export default function App() {
   const handleAnalyze = async (targetTicker) => {
     const t = targetTicker || ticker;
     if (!t) return;
-    setLoading(true); setErrorMsg('');
+    setLoading(true); setErrorMsg(''); setData(null);
     try {
       const res = await authFetch('/api/analyze', {
         method: 'POST',
@@ -227,7 +270,8 @@ export default function App() {
         setErrorMsg(err.detail || "分析失敗，請檢查代碼");
       }
     } catch(e) { 
-        setErrorMsg("連線錯誤，請確認後端是否運行中"); 
+        console.error(e);
+        setErrorMsg("連線錯誤，請確認後端網址設定正確且主機運行中"); 
     } finally { 
         setLoading(false); 
     }
@@ -264,7 +308,12 @@ export default function App() {
     loadUserData();
   };
 
-  if (!token) return <LoginView onLogin={(t, u) => { setToken(t); setUser(u); localStorage.setItem('token', t); localStorage.setItem('user', u); }} />;
+  if (!token) return <LoginView onLogin={(t, u) => { 
+      setToken(t); 
+      setUser(u); 
+      localStorage.setItem('token', t); 
+      localStorage.setItem('user', u); 
+  }} apiUrl={apiUrl} setApiUrl={updateApiUrl} />;
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-gray-900 pb-20 lg:pb-0">
@@ -414,7 +463,7 @@ export default function App() {
                   <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
                       <h3 className="font-bold text-gray-700 text-sm mb-3 flex items-center gap-2"><Newspaper size={16}/> 真實新聞快訊</h3>
                       <div className="space-y-3">
-                          {data.news_list && data.news_list.map((n,i)=>(
+                          {data.news_list && data.news_list.length > 0 ? data.news_list.map((n,i)=>(
                               <a key={i} href={n.link} target="_blank" rel="noreferrer" className="block p-3 border rounded-xl hover:shadow-md transition bg-gray-50/50 hover:bg-white text-decoration-none">
                                   <div className="text-sm font-bold text-gray-800 line-clamp-1 mb-1">{n.title}</div>
                                   <div className="text-xs text-gray-400 flex justify-between">
