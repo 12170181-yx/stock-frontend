@@ -204,7 +204,6 @@ function App() {
     else if (duration === "short") durationLabel = "短期(5日)";
     else if (duration === "long") durationLabel = "長期(1年)";
 
-    try:
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -877,3 +876,4 @@ function App() {
 }
 
 export default App;
+
