@@ -2,18 +2,80 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-    <title>AI 投資戰情室</title>
-    <meta name="description" content="AI 股票分析 App：四大面向評分、ROI、資金配置、風險預警、K 線分析、收藏與模擬資產管理。" />
-    <meta name="theme-color" content="#2563eb" />
+    <!-- 基本 SEO -->
+    <title>AI 股票分析 APP｜投資戰情室</title>
+    <meta
+      name="description"
+      content="輸入股票代碼與本金，一鍵取得 AI 綜合評分、波段價位建議、ROI 估算、極端行情預警、K 線詳細分析與模擬資產管理（登入後）。"
+    />
+    <meta name="theme-color" content="#0b1220" />
 
-    <!-- Optional: favicon（若你沒有也不會影響運作） -->
-    <!-- <link rel="icon" type="image/svg+xml" href="/favicon.svg" /> -->
+    <!-- Open Graph（分享卡片） -->
+    <meta property="og:title" content="AI 股票分析 APP｜投資戰情室" />
+    <meta
+      property="og:description"
+      content="輸入股票代碼與本金，一鍵取得 AI 綜合評分、波段價位建議、ROI 估算、極端行情預警、K 線詳細分析與模擬資產管理（登入後）。"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://stock-frontend-theta.vercel.app" />
+    <!-- 你有 logo 再換這個路徑：/og.png -->
+    <!-- <meta property="og:image" content="https://stock-frontend-theta.vercel.app/og.png" /> -->
+
+    <!-- 預留 favicon（你有圖再換，放到 public/ or 根目錄） -->
+    <!-- <link rel="icon" href="/favicon.ico" /> -->
+
+    <!-- 避免載入期間白屏：先給深色底 -->
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #0b1220;
+      }
+      #root {
+        min-height: 100%;
+      }
+      /* 超簡單 loading（React 還沒掛上前） */
+      .boot {
+        height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(255,255,255,0.78);
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans TC", Arial, sans-serif;
+        letter-spacing: 0.3px;
+      }
+      .boot span {
+        display: inline-flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.65);
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      .dot:nth-child(2){ animation-delay: .15s; opacity: .85; }
+      .dot:nth-child(3){ animation-delay: .3s; opacity: .7; }
+      @keyframes pulse {
+        0%, 100% { transform: translateY(0); opacity: .55; }
+        50% { transform: translateY(-4px); opacity: 1; }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
-
+    <div id="root">
+      <div class="boot">
+        <span>
+          <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+          系統啟動中...
+        </span>
+      </div>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
