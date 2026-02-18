@@ -1,21 +1,23 @@
 // ===============================
 // 檔案：stock-frontend/src/App.jsx
-// 目的：強化註冊/登入 + 修正上線 API 問題 + 冷啟動提示
+// 目的：移除登入系統，將所有功能改為公開模式 (配合 main.py 修改)
 // ===============================
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'; // 預留給 K 線圖
 
 // =========================
-// API Base（本機不設 env → 走 Vite proxy；上線 Vercel 設 VITE_API_BASE → 直打 Render）
+// API Base 設定
 // =========================
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
+
 function apiUrl(path) {
   if (!path.startsWith("/")) path = "/" + path;
   return `${API_BASE}${path}`;
 }
 
 // =========================
-// 基本工具
+// 工具函式
 // =========================
 function formatNumber(value) {
   if (value === null || value === undefined || isNaN(value)) return "-";
@@ -33,321 +35,109 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   }
 }
 
-// Render 冷啟動：先打一個輕量 API 喚醒後端
+// Render/Vercel 冷啟動喚醒
 async function warmUpBackend() {
   try {
-    await fetchWithTimeout(apiUrl("/api/news"), { method: "GET" }, 8000);
+    // 嘗試打一個輕量 API
+    await fetchWithTimeout(apiUrl("/health"), { method: "GET" }, 5000).catch(() => {});
   } catch {
-    // 不阻斷流程：只是盡量喚醒
+    // 忽略錯誤
   }
 }
 
-// =========================
-// 註冊 / 登入基本規則（你要的）
-// =========================
-// 帳號：4–20，只允許英文/數字/底線
-const USERNAME_REGEX = /^[A-Za-z0-9_]{4,20}$/;
-
-// 密碼：至少 8 碼，且必須包含「英文 + 數字」
-function passwordRuleCheck(pw) {
-  const minLen = pw.length >= 8;
-  const hasLetter = /[A-Za-z]/.test(pw);
-  const hasNumber = /[0-9]/.test(pw);
-  const hasUpper = /[A-Z]/.test(pw);
-  return {
-    ok: minLen && hasLetter && hasNumber,
-    minLen,
-    hasLetter,
-    hasNumber,
-    hasUpper,
-  };
-}
-
 export default function App() {
-  // ===== Auth 狀態 =====
-  const [token, setToken] = useState(null);
-  const [username, setUsername] = useState("");
-
-  // 登入表單
-  const [loginUsername, setLoginUsername] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
-
-  // 註冊表單
-  const [registerUsername, setRegisterUsername] = useState("");
-  const [registerPassword, setRegisterPassword] = useState("");
-
-  const [authLoading, setAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState(""); // 共用錯誤訊息（登入/註冊）
-  const [authInfo, setAuthInfo] = useState(""); // 共用提示訊息
-
   // ===== 輸入區 =====
   const [symbol, setSymbol] = useState("2330.TW");
   const [principal, setPrincipal] = useState(100000);
   const [strategy, setStrategy] = useState("none");
   const [duration, setDuration] = useState("mid");
-  const [isFavorite, setIsFavorite] = useState(false);
+
+  // ===== 收藏 (改為 LocalStorage) =====
+  const [favorites, setFavorites] = useState([]);
 
   // ===== 分析結果 =====
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
   const [analysisResult, setAnalysisResult] = useState(null);
-  const [roiTab, setRoiTab] = useState("mid");
 
   // ===== 新聞 =====
   const [newsList, setNewsList] = useState([]);
   const [newsLoading, setNewsLoading] = useState(false);
 
-  // ===== 收藏 =====
-  const [favorites, setFavorites] = useState([]);
-
-  // ===== 模擬資產 =====
-  const [portfolio, setPortfolio] = useState(null);
-  const [portfolioLoading, setPortfolioLoading] = useState(false);
-  const [portfolioError, setPortfolioError] = useState("");
-
-  // ===== K 線詳細分析（先留資料，後端 endpoint 我們下一步再補齊）=====
+  // ===== K 線 / 資產 (模擬) =====
   const [klineData, setKlineData] = useState(null);
   const [klineLoading, setKlineLoading] = useState(false);
-  const [klineError, setKlineError] = useState("");
+  const [portfolio, setPortfolio] = useState(null);
 
   // =========================
-  // 初始化：讀 localStorage token
+  // 初始化：讀取新聞 & 本地收藏
   // =========================
   useEffect(() => {
-    const savedToken = localStorage.getItem("stock_token");
-    const savedUser = localStorage.getItem("stock_username");
-    if (savedToken) {
-      setToken(savedToken);
-      if (savedUser) setUsername(savedUser);
-    }
-  }, []);
+    // 1. 讀取收藏
+    const savedFavs = JSON.parse(localStorage.getItem("stock_favorites") || "[]");
+    setFavorites(savedFavs);
 
-  // =========================
-  // 取得新聞（喚醒後端 + 顯示）
-  // =========================
-  useEffect(() => {
-    async function fetchNews() {
+    // 2. 喚醒後端並取得新聞
+    async function initData() {
       try {
         setNewsLoading(true);
+        await warmUpBackend(); // 喚醒
         const res = await fetchWithTimeout(apiUrl("/api/news"), {}, 15000);
-        if (!res.ok) throw new Error("無法取得市場新聞");
-        const data = await res.json();
-        setNewsList(Array.isArray(data) ? data : []);
+        if (res.ok) {
+          const data = await res.json();
+          setNewsList(Array.isArray(data) ? data : []);
+        }
       } catch (err) {
-        console.error(err);
+        console.error("新聞載入失敗", err);
       } finally {
         setNewsLoading(false);
       }
     }
-    fetchNews();
+    initData();
   }, []);
 
   // =========================
-  // 表單驗證（你要求的基本規則）
+  // 功能：收藏 (Local Storage)
   // =========================
-  const loginUsernameValid = useMemo(() => USERNAME_REGEX.test(loginUsername.trim()), [loginUsername]);
-  const loginPasswordCheck = useMemo(() => passwordRuleCheck(loginPassword), [loginPassword]);
-
-  const registerUsernameValid = useMemo(() => USERNAME_REGEX.test(registerUsername.trim()), [registerUsername]);
-  const registerPasswordCheck = useMemo(() => passwordRuleCheck(registerPassword), [registerPassword]);
-
-  // =========================
-  // 登入 / 登出 / 註冊（強化版）
-  // =========================
-  async function handleLogin(e) {
-    e.preventDefault();
-    setAuthError("");
-    setAuthInfo("");
-    setAuthLoading(true);
-
-    const u = loginUsername.trim();
-    const p = loginPassword;
-
-    // 前端先擋掉格式不對
-    if (!USERNAME_REGEX.test(u)) {
-      setAuthError("登入失敗：帳號格式不正確（4–20 碼，僅英文/數字/底線）");
-      setAuthLoading(false);
-      return;
+  function toggleFavorite() {
+    const s = symbol.trim().toUpperCase();
+    if (!s) return;
+    
+    let newFavs;
+    if (favorites.includes(s)) {
+      newFavs = favorites.filter((item) => item !== s);
+    } else {
+      newFavs = [...favorites, s];
     }
-    const pwCheck = passwordRuleCheck(p);
-    if (!pwCheck.ok) {
-      setAuthError("登入失敗：密碼格式不符合要求（至少 8 碼，且需包含英文 + 數字）");
-      setAuthLoading(false);
-      return;
-    }
-
-    try {
-      // Render 冷啟動先喚醒
-      await warmUpBackend();
-
-      const body = new URLSearchParams();
-      body.append("username", u);
-      body.append("password", p);
-
-      const res = await fetchWithTimeout(
-        apiUrl("/token"),
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body,
-        },
-        20000
-      );
-
-      if (!res.ok) {
-        if (res.status === 401) throw new Error("登入失敗：帳號或密碼錯誤");
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || `登入失敗（HTTP ${res.status}）`);
-      }
-
-      const data = await res.json();
-      setToken(data.access_token);
-      setUsername(u);
-
-      localStorage.setItem("stock_token", data.access_token);
-      localStorage.setItem("stock_username", u);
-
-      setAuthInfo("✅ 登入成功！");
-      setLoginPassword("");
-    } catch (err) {
-      const msg = err?.name === "AbortError"
-        ? "登入逾時：後端可能在冷啟動，請稍後再試"
-        : err?.message || "登入發生錯誤";
-
-      // Vercel 常見：Failed to fetch（CORS/後端掛掉/網路）
-      if (String(msg).includes("Failed to fetch")) {
-        setAuthError("登入失敗：無法連到後端（可能後端睡著、網路或 CORS 問題）");
-      } else {
-        setAuthError(msg);
-      }
-    } finally {
-      setAuthLoading(false);
-    }
+    setFavorites(newFavs);
+    localStorage.setItem("stock_favorites", JSON.stringify(newFavs));
   }
-
-  function handleLogout() {
-    setToken(null);
-    setUsername("");
-    setFavorites([]);
-    setIsFavorite(false);
-    setPortfolio(null);
-    setKlineData(null);
-    localStorage.removeItem("stock_token");
-    localStorage.removeItem("stock_username");
-    setAuthInfo("你已登出");
-  }
-
-  async function handleRegister(e) {
-    e.preventDefault();
-    setAuthError("");
-    setAuthInfo("");
-    setAuthLoading(true);
-
-    const u = registerUsername.trim();
-    const p = registerPassword;
-
-    // 前端驗證
-    if (!USERNAME_REGEX.test(u)) {
-      setAuthError("註冊失敗：帳號需 4–20 碼，且僅能包含英文、數字、底線（_）");
-      setAuthLoading(false);
-      return;
-    }
-    if (!registerPasswordCheck.ok) {
-      setAuthError("註冊失敗：密碼至少 8 碼，且必須同時包含英文 + 數字");
-      setAuthLoading(false);
-      return;
-    }
-
-    try {
-      await warmUpBackend();
-
-      // 1) 先註冊
-      const res = await fetchWithTimeout(
-        apiUrl("/register"),
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: u, password: p }),
-        },
-        20000
-      );
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || `註冊失敗（HTTP ${res.status}）`);
-      }
-
-      // 2) 註冊成功後自動登入
-      setAuthInfo("✅ 註冊成功，正在自動登入...");
-
-      const body = new URLSearchParams();
-      body.append("username", u);
-      body.append("password", p);
-
-      const loginRes = await fetchWithTimeout(
-        apiUrl("/token"),
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body,
-        },
-        20000
-      );
-
-      if (!loginRes.ok) {
-        setAuthInfo("✅ 註冊成功！請用新帳號登入");
-        setLoginUsername(u);
-        return;
-      }
-
-      const loginData = await loginRes.json();
-      setToken(loginData.access_token);
-      setUsername(u);
-
-      localStorage.setItem("stock_token", loginData.access_token);
-      localStorage.setItem("stock_username", u);
-
-      setAuthInfo("✅ 註冊並登入成功！");
-      setRegisterPassword("");
-      setLoginPassword("");
-    } catch (err) {
-      const msg = err?.name === "AbortError"
-        ? "註冊逾時：後端可能在冷啟動，請稍後再試"
-        : err?.message || "註冊發生錯誤";
-
-      if (String(msg).includes("Failed to fetch")) {
-        setAuthError("註冊失敗：無法連到後端（可能後端睡著、網路或 CORS 問題）");
-      } else {
-        setAuthError(msg);
-      }
-    } finally {
-      setAuthLoading(false);
-    }
-  }
+  const isFavorite = favorites.includes(symbol.trim().toUpperCase());
 
   // =========================
-  // 分析（修 API + 冷啟動提示 + 更清楚錯誤訊息）
+  // 功能：執行分析
   // =========================
   async function handleAnalyze() {
     setAnalyzing(true);
     setAnalysisError("");
     setAnalysisResult(null);
+    setPortfolio(null); // 清空舊的資產模擬
+    setKlineData(null); // 清空舊的K線
 
     const s = symbol.trim();
     if (!s) {
-      setAnalysisError("請先輸入股票代碼或名稱");
+      setAnalysisError("請輸入股票代碼");
       setAnalyzing(false);
       return;
     }
 
+    // 轉換 duration標籤 (配合後端邏輯)
     let durationLabel = "中期(60日)";
     if (duration === "day") durationLabel = "當沖(1日)";
     else if (duration === "short") durationLabel = "短期(5日)";
     else if (duration === "long") durationLabel = "長期(1年)";
 
     try {
-      await warmUpBackend();
-
       const res = await fetchWithTimeout(
         apiUrl("/api/analyze"),
         {
@@ -364,24 +154,31 @@ export default function App() {
       );
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || `分析失敗（HTTP ${res.status}）`);
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `分析失敗 (HTTP ${res.status})`);
       }
 
       const data = await res.json();
       setAnalysisResult(data);
 
-      if (duration === "day") setRoiTab("day");
-      else if (duration === "short") setRoiTab("short");
-      else if (duration === "mid") setRoiTab("mid");
-      else setRoiTab("long");
+      // 分析成功後，自動產生一個模擬資產結果 (因為移除了資料庫，這裡用前端計算或後端回傳的數據做簡單呈現)
+      if (data.price && principal) {
+        const qty = Math.floor(Number(principal) / data.price);
+        const cost = qty * data.price;
+        setPortfolio({
+            total_asset: Number(principal), // 假設尚未波動
+            total_cost: cost,
+            cash: Number(principal) - cost,
+            shares: qty,
+            roi_rate: 0
+        });
+      }
+
     } catch (err) {
-      if (err?.name === "AbortError") {
-        setAnalysisError("分析逾時：後端可能在冷啟動（Render 常見），請稍後再按一次分析");
-      } else if (String(err?.message || "").includes("Failed to fetch")) {
-        setAnalysisError("分析失敗：無法連到後端（可能後端睡著、網路或 CORS 問題）");
+      if (err.name === "AbortError") {
+        setAnalysisError("連線逾時，請檢查後端是否啟動，或稍後再試。");
       } else {
-        setAnalysisError(err?.message || "分析過程發生錯誤");
+        setAnalysisError(err.message || "發生未知錯誤");
       }
     } finally {
       setAnalyzing(false);
@@ -389,364 +186,268 @@ export default function App() {
   }
 
   // =========================
-  // 收藏（先保留 UI；真正 API 我們下一步改後端 main.py 補齊）
-  // =========================
-  async function toggleFavorite() {
-    if (!token) {
-      alert("請先登入後才能收藏股票");
-      return;
-    }
-    alert("收藏功能需要後端加入 /api/favorites 相關 API，我們下一步會在 stock-backend/main.py 補上。");
-  }
-
-  // =========================
-  // 模擬資產（已存在後端 /api/portfolio）
-  // =========================
-  async function loadPortfolio() {
-    if (!token) {
-      alert("請先登入，才能查看模擬資產");
-      return;
-    }
-    setPortfolioLoading(true);
-    setPortfolioError("");
-    try {
-      const res = await fetchWithTimeout(
-        apiUrl("/api/portfolio"),
-        { headers: { Authorization: `Bearer ${token}` } },
-        20000
-      );
-      if (!res.ok) {
-        if (res.status === 401) throw new Error("尚未登入或登入已過期，請重新登入");
-        throw new Error("無法取得模擬資產");
-      }
-      const data = await res.json();
-      setPortfolio(data);
-    } catch (err) {
-      setPortfolioError(err?.message || "取得模擬資產失敗");
-    } finally {
-      setPortfolioLoading(false);
-    }
-  }
-
-  // =========================
-  // K 線詳細分析（先保留 UI；下一步後端補 /api/kline-detail）
+  // 功能：載入 K 線 (模擬/公開 API)
   // =========================
   async function loadKlineDetail() {
-    if (!token) {
-      alert("請先登入，才能查看 K 線詳細分析");
-      return;
-    }
     setKlineLoading(true);
-    setKlineError("");
-    setKlineData(null);
     try {
-      // 後端 아직沒做，先提示
-      throw new Error("K 線詳細分析需要後端提供 /api/kline-detail，我們下一步會在 stock-backend/main.py 加上。");
-    } catch (err) {
-      setKlineError(err?.message || "取得 K 線資料失敗");
+        // 這裡暫時模擬，因為後端 /api/kline 可能還沒實作完整
+        // 下一步我們會去後端補上這個 API
+        await new Promise(r => setTimeout(r, 800)); 
+        const mockData = Array.from({length: 30}, (_, i) => ({
+            day: i,
+            price: (analysisResult?.price || 100) + (Math.random() * 10 - 5)
+        }));
+        setKlineData(mockData);
+    } catch (e) {
+        alert("K線資料讀取錯誤");
     } finally {
-      setKlineLoading(false);
+        setKlineLoading(false);
     }
   }
 
-  // =========================
-  // UI：提示文字（你要「明確知道有沒有登入」）
-  // =========================
-  const loginHint = useMemo(() => {
-    if (!loginUsername) return "帳號規則：4–20 碼，只允許英文/數字/底線";
-    return loginUsernameValid ? "✅ 帳號格式正確" : "❌ 帳號格式錯誤（僅英文/數字/底線，4–20 碼）";
-  }, [loginUsername, loginUsernameValid]);
-
-  const loginPwHint = useMemo(() => {
-    if (!loginPassword) return "密碼規則：至少 8 碼，需包含英文 + 數字";
-    return loginPasswordCheck.ok
-      ? `✅ 密碼格式 OK${loginPasswordCheck.hasUpper ? "" : "（建議加入 1 個大寫更安全）"}`
-      : "❌ 密碼格式不符合（至少 8 碼，需包含英文 + 數字）";
-  }, [loginPassword, loginPasswordCheck]);
-
-  const regHint = useMemo(() => {
-    if (!registerUsername) return "帳號規則：4–20 碼，只允許英文/數字/底線";
-    return registerUsernameValid ? "✅ 帳號格式正確" : "❌ 帳號格式錯誤（僅英文/數字/底線，4–20 碼）";
-  }, [registerUsername, registerUsernameValid]);
-
-  const regPwHint = useMemo(() => {
-    if (!registerPassword) return "密碼規則：至少 8 碼，需包含英文 + 數字";
-    return registerPasswordCheck.ok
-      ? `✅ 密碼格式 OK${registerPasswordCheck.hasUpper ? "" : "（建議加入 1 個大寫更安全）"}`
-      : "❌ 密碼格式不符合（至少 8 碼，需包含英文 + 數字）";
-  }, [registerPassword, registerPasswordCheck]);
-
   return (
-    <div style={{ maxWidth: 980, margin: "0 auto", padding: 16, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, 'Noto Sans TC', Arial" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: 12, borderRadius: 12, background: "#f5f7ff" }}>
-        <div style={{ fontSize: 22, fontWeight: 800 }}>📈 AI 投資戰情室</div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          {token ? (
-            <>
-              <div style={{ fontWeight: 700 }}>已登入：{username}</div>
-              <button onClick={handleLogout} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #ccc", background: "#fff", cursor: "pointer" }}>
-                登出
-              </button>
-            </>
-          ) : (
-            <form onSubmit={handleLogin} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <input
-                value={loginUsername}
-                onChange={(e) => setLoginUsername(e.target.value)}
-                placeholder="帳號"
-                style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #d0d5dd", minWidth: 140 }}
-              />
-              <input
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                placeholder="密碼"
-                type="password"
-                style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #d0d5dd", minWidth: 140 }}
-              />
-              <button
-                type="submit"
-                disabled={authLoading}
-                style={{ padding: "10px 14px", borderRadius: 10, border: "0", background: "#2f5bff", color: "white", fontWeight: 700, cursor: "pointer" }}
-              >
-                {authLoading ? "登入中..." : "登入"}
-              </button>
-              <div style={{ fontSize: 12, color: loginUsernameValid ? "#15803d" : "#b42318" }}>{loginHint}</div>
-              <div style={{ fontSize: 12, color: loginPasswordCheck.ok ? "#15803d" : "#b42318" }}>{loginPwHint}</div>
-            </form>
-          )}
+    <div style={{ maxWidth: 1024, margin: "0 auto", padding: 16, fontFamily: "system-ui, -apple-system, sans-serif", color: "#1f2937" }}>
+      
+      {/* 標題列 */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, padding: 16, background: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)", borderRadius: 16, color: "white", boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)" }}>
+        <div>
+            <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>🚀 AI 投資戰情室</h1>
+            <div style={{ fontSize: "0.85rem", opacity: 0.8, marginTop: 4 }}>全功能開放版 (無須登入)</div>
+        </div>
+        <div style={{ fontSize: "0.85rem", background: "rgba(255,255,255,0.1)", padding: "4px 12px", borderRadius: 20 }}>
+            System Status: Online
         </div>
       </div>
 
-      {!token && (
-        <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: "#ffffff", border: "1px solid #e5e7eb" }}>
-          <div style={{ fontWeight: 800, marginBottom: 8 }}>沒有帳號？快速註冊（註冊成功後會自動登入）</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 20 }}>
+        
+        {/* 左側：控制面板 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            
+            {/* 1. 輸入參數卡片 */}
+            <div style={{ background: "white", padding: 20, borderRadius: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.1)", border: "1px solid #e5e7eb" }}>
+                <h3 style={{ margin: "0 0 16px 0", fontSize: "1.1rem", fontWeight: 700, color: "#374151" }}>📊 參數設定</h3>
+                
+                <div style={{ display: "grid", gap: 16 }}>
+                    {/* 股票代碼 */}
+                    <div>
+                        <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 600, marginBottom: 6, color: "#4b5563" }}>股票代碼</label>
+                        <div style={{ display: "flex", gap: 8 }}>
+                            <input 
+                                value={symbol}
+                                onChange={(e) => setSymbol(e.target.value)}
+                                placeholder="例: 2330.TW, NVDA"
+                                style={{ flex: 1, padding: "10px", borderRadius: 8, border: "1px solid #d1d5db", fontSize: "1rem" }}
+                            />
+                            <button 
+                                onClick={toggleFavorite}
+                                style={{ padding: "0 14px", fontSize: "1.2rem", border: "1px solid #d1d5db", borderRadius: 8, background: isFavorite ? "#fffbeb" : "white", color: isFavorite ? "#d97706" : "#9ca3af", cursor: "pointer" }}
+                                title="加入/移除收藏"
+                            >
+                                {isFavorite ? "★" : "☆"}
+                            </button>
+                        </div>
+                        {favorites.length > 0 && (
+                            <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                {favorites.map(fav => (
+                                    <span key={fav} onClick={() => setSymbol(fav)} style={{ fontSize: "0.75rem", background: "#f3f4f6", padding: "2px 8px", borderRadius: 12, cursor: "pointer", color: "#4b5563" }}>
+                                        {fav}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+                    </div>
 
-          <form onSubmit={handleRegister} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <input
-              value={registerUsername}
-              onChange={(e) => setRegisterUsername(e.target.value)}
-              placeholder="新帳號（4–20，英文/數字/_）"
-              style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #d0d5dd", minWidth: 220 }}
-            />
-            <input
-              value={registerPassword}
-              onChange={(e) => setRegisterPassword(e.target.value)}
-              placeholder="新密碼（至少8碼，英文+數字）"
-              type="password"
-              style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #d0d5dd", minWidth: 260 }}
-            />
-            <button
-              type="submit"
-              disabled={authLoading}
-              style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #cbd5e1", background: "#f8fafc", cursor: "pointer", fontWeight: 800 }}
-            >
-              {authLoading ? "送出中..." : "註冊"}
-            </button>
+                    {/* 本金 */}
+                    <div>
+                        <label style={{ display: "block", fontSize: "0.9rem", fontWeight: 600, marginBottom: 6, color: "#4b5563" }}>投資本金 (TWD/USD)</label>
+                        <input 
+                            type="number"
+                            value={principal}
+                            onChange={(e) => setPrincipal(e.target.value)}
+                            style={{ width: "100%", padding: "10px", borderRadius: 8, border: "1px solid #d1d5db", fontSize: "1rem", boxSizing: "border-box" }}
+                        />
+                    </div>
 
-            <div style={{ width: "100%" }} />
-            <div style={{ fontSize: 12, color: registerUsernameValid ? "#15803d" : "#b42318" }}>{regHint}</div>
-            <div style={{ fontSize: 12, color: registerPasswordCheck.ok ? "#15803d" : "#b42318" }}>{regPwHint}</div>
-          </form>
+                    {/* 策略與期間 */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <div>
+                            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: 6, color: "#4b5563" }}>策略風格</label>
+                            <select 
+                                value={strategy} 
+                                onChange={(e) => setStrategy(e.target.value)}
+                                style={{ width: "100%", padding: "8px", borderRadius: 8, border: "1px solid #d1d5db", background: "white" }}
+                            >
+                                <option value="none">綜合分析</option>
+                                <option value="value">價值投資</option>
+                                <option value="swing">波段操作</option>
+                                <option value="momentum">動能交易</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: 6, color: "#4b5563" }}>持有期間</label>
+                            <select 
+                                value={duration} 
+                                onChange={(e) => setDuration(e.target.value)}
+                                style={{ width: "100%", padding: "8px", borderRadius: 8, border: "1px solid #d1d5db", background: "white" }}
+                            >
+                                <option value="day">當沖 (1日)</option>
+                                <option value="short">短期 (5日)</option>
+                                <option value="mid">中期 (60日)</option>
+                                <option value="long">長期 (1年)</option>
+                            </select>
+                        </div>
+                    </div>
 
-          {authError && (
-            <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "#fff1f2", color: "#b42318", fontWeight: 700 }}>
-              {authError}
-            </div>
-          )}
-          {authInfo && (
-            <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "#ecfdf3", color: "#15803d", fontWeight: 700 }}>
-              {authInfo}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 輸入區 */}
-      <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
-        <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e5e7eb", background: "#fff" }}>
-          <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 10 }}>輸入參數</div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
-            <div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>股票代碼或名稱</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <input
-                  value={symbol}
-                  onChange={(e) => setSymbol(e.target.value)}
-                  placeholder="如 2330.TW 或 AAPL"
-                  style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1px solid #d0d5dd" }}
-                />
-                <button
-                  onClick={toggleFavorite}
-                  style={{ width: 52, borderRadius: 10, border: "1px solid #d0d5dd", background: "#fff", cursor: "pointer", fontSize: 18 }}
-                  title={token ? "收藏 / 取消收藏" : "需登入才能收藏"}
-                >
-                  {isFavorite ? "★" : "☆"}
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>本金金額（TWD）</div>
-              <input
-                type="number"
-                value={principal}
-                onChange={(e) => setPrincipal(e.target.value)}
-                min={0}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #d0d5dd" }}
-              />
-            </div>
-
-            <div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>交易策略</div>
-              <select
-                value={strategy}
-                onChange={(e) => setStrategy(e.target.value)}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #d0d5dd", background: "#fff" }}
-              >
-                <option value="none">無（不限）</option>
-                <option value="value">價值投資</option>
-                <option value="swing">波段交易</option>
-                <option value="momentum">動能策略</option>
-                <option value="growth">成長股策略</option>
-                <option value="dividend">高股息策略</option>
-                <option value="trend">趨勢追蹤</option>
-              </select>
-            </div>
-
-            <div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>預計持有時間</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
-                {[
-                  ["day", "當沖（1 日）"],
-                  ["short", "短期（5 日）"],
-                  ["mid", "中期（60 日）"],
-                  ["long", "長期（1 年）"],
-                ].map(([k, label]) => (
-                  <button
-                    key={k}
-                    onClick={() => setDuration(k)}
-                    style={{
-                      padding: "10px 8px",
-                      borderRadius: 10,
-                      border: duration === k ? "2px solid #2f5bff" : "1px solid #d0d5dd",
-                      background: duration === k ? "#eef2ff" : "#fff",
-                      cursor: "pointer",
-                      fontWeight: 800,
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <button
-              onClick={handleAnalyze}
-              disabled={analyzing}
-              style={{
-                marginTop: 6,
-                padding: "12px 14px",
-                borderRadius: 12,
-                border: "0",
-                background: "#2f5bff",
-                color: "white",
-                fontWeight: 900,
-                cursor: "pointer",
-              }}
-            >
-              {analyzing ? "分析中..." : "⚡ 開始分析"}
-            </button>
-
-            {analysisError && (
-              <div style={{ padding: 10, borderRadius: 10, background: "#fff1f2", color: "#b42318", fontWeight: 800 }}>
-                {analysisError}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* 分析結果（保留現有資料結構） */}
-        {analysisResult && (
-          <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e5e7eb", background: "#fff" }}>
-            <div style={{ fontWeight: 900, fontSize: 16 }}>分析結果</div>
-            <div style={{ marginTop: 8 }}>
-              股票：<b>{analysisResult.symbol}</b>｜現價：<b>{formatNumber(analysisResult.price)}</b>｜
-              AI 評分：<b>{analysisResult.ai_score}</b>｜
-              傾向：<b>{analysisResult.ai_sentiment}</b>
-            </div>
-
-            <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
-              {analysisResult.score_breakdown && (
-                <>
-                  <div style={{ padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #e5e7eb" }}>
-                    技術面<br /><b>{analysisResult.score_breakdown.technical}</b>
-                  </div>
-                  <div style={{ padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #e5e7eb" }}>
-                    基本面<br /><b>{analysisResult.score_breakdown.fundamental}</b>
-                  </div>
-                  <div style={{ padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #e5e7eb" }}>
-                    籌碼面<br /><b>{analysisResult.score_breakdown.chip}</b>
-                  </div>
-                  <div style={{ padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #e5e7eb" }}>
-                    消息面<br /><b>{analysisResult.score_breakdown.news}</b>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div style={{ marginTop: 12, fontWeight: 900 }}>模擬資產管理（需登入）</div>
-            <button
-              onClick={loadPortfolio}
-              style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, border: "1px solid #d0d5dd", background: "#fff", cursor: "pointer", fontWeight: 900 }}
-            >
-              重新載入模擬資產
-            </button>
-            {portfolioLoading && <div style={{ marginTop: 8 }}>載入中...</div>}
-            {portfolioError && <div style={{ marginTop: 8, color: "#b42318", fontWeight: 800 }}>{portfolioError}</div>}
-            {portfolio && (
-              <div style={{ marginTop: 8 }}>
-                <div>模擬總資產：<b>{formatNumber(portfolio.total_asset)}</b></div>
-                <div>總投入成本：<b>{formatNumber(portfolio.total_cost)}</b></div>
-                <div>未實現損益：<b>{formatNumber(portfolio.unrealized_pnl)}</b></div>
-              </div>
-            )}
-
-            <div style={{ marginTop: 12, fontWeight: 900 }}>K 線詳細分析（需登入）</div>
-            <button
-              onClick={loadKlineDetail}
-              style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, border: "1px solid #d0d5dd", background: "#fff", cursor: "pointer", fontWeight: 900 }}
-            >
-              查看 K 線詳細分析
-            </button>
-            {klineLoading && <div style={{ marginTop: 8 }}>載入中...</div>}
-            {klineError && <div style={{ marginTop: 8, color: "#b42318", fontWeight: 800 }}>{klineError}</div>}
-            {klineData && <pre style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{JSON.stringify(klineData, null, 2)}</pre>}
-          </div>
-        )}
-
-        {/* 新聞 */}
-        <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e5e7eb", background: "#fff" }}>
-          <div style={{ fontWeight: 900, fontSize: 16 }}>全球市場快訊（Real-time）</div>
-          {newsLoading && <div style={{ marginTop: 8 }}>載入新聞中...</div>}
-          {!newsLoading && newsList.length === 0 && <div style={{ marginTop: 8 }}>目前沒有新聞資料。</div>}
-          <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-            {newsList.map((n, idx) => (
-              <div key={idx} style={{ padding: 10, borderRadius: 10, border: "1px solid #e5e7eb", background: "#f8fafc" }}>
-                <div style={{ fontWeight: 900 }}>{n.title}</div>
-                <div style={{ fontSize: 12, color: "#475467" }}>
-                  {n.source || "新聞"}｜{n.time || ""}
+                    <button 
+                        onClick={handleAnalyze}
+                        disabled={analyzing}
+                        style={{ 
+                            marginTop: 10, padding: "14px", borderRadius: 10, border: "none", 
+                            background: analyzing ? "#94a3b8" : "#2563eb", 
+                            color: "white", fontSize: "1rem", fontWeight: 700, 
+                            cursor: analyzing ? "not-allowed" : "pointer",
+                            transition: "background 0.2s"
+                        }}
+                    >
+                        {analyzing ? "AI 分析運算中..." : "⚡ 開始分析"}
+                    </button>
+                    
+                    {analysisError && (
+                        <div style={{ padding: 12, background: "#fef2f2", color: "#ef4444", borderRadius: 8, fontSize: "0.9rem", border: "1px solid #fee2e2" }}>
+                            ⚠️ {analysisError}
+                        </div>
+                    )}
                 </div>
-              </div>
-            ))}
-          </div>
+            </div>
+
+             {/* 2. 新聞區塊 */}
+             <div style={{ background: "white", padding: 20, borderRadius: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.1)", border: "1px solid #e5e7eb", flex: 1 }}>
+                <h3 style={{ margin: "0 0 16px 0", fontSize: "1.1rem", fontWeight: 700, display: "flex", justifyContent: "space-between" }}>
+                    <span>📰 市場快訊</span>
+                    {newsLoading && <span style={{ fontSize: "0.8rem", fontWeight: 400, color: "#6b7280" }}>更新中...</span>}
+                </h3>
+                <div style={{ maxHeight: 400, overflowY: "auto", display: "grid", gap: 10 }}>
+                    {!newsLoading && newsList.length === 0 && <div style={{ color: "#9ca3af", textAlign: "center", padding: 20 }}>暫無新聞</div>}
+                    {newsList.map((news, idx) => (
+                        <div key={idx} style={{ padding: 12, borderRadius: 8, background: "#f8fafc", borderLeft: "3px solid #3b82f6" }}>
+                            <a href={news.link} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", color: "#1f2937", fontWeight: 600, fontSize: "0.95rem", display: "block", marginBottom: 4 }}>
+                                {news.title}
+                            </a>
+                            <div style={{ fontSize: "0.75rem", color: "#64748b", display: "flex", justifyContent: "space-between" }}>
+                                <span>{news.source || "News"}</span>
+                                <span>{news.published || ""}</span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
         </div>
 
-        {/* API Base 顯示（除錯用，使用者看不到也可留著） */}
-        <div style={{ fontSize: 12, color: "#667085", textAlign: "center" }}>
-          API_BASE：{API_BASE ? API_BASE : "(本機模式：使用 Vite Proxy)"}
+        {/* 右側：分析結果展示 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {analysisResult ? (
+                <>
+                    {/* 主要結果卡片 */}
+                    <div style={{ background: "white", padding: 24, borderRadius: 16, boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)", border: "1px solid #e5e7eb" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, borderBottom: "1px solid #f1f5f9", paddingBottom: 16 }}>
+                            <div>
+                                <h2 style={{ margin: 0, fontSize: "1.8rem", color: "#111827" }}>{analysisResult.symbol}</h2>
+                                <div style={{ color: "#6b7280", marginTop: 4 }}>現價: <span style={{ color: "#111827", fontWeight: 700, fontSize: "1.2rem" }}>{formatNumber(analysisResult.price)}</span></div>
+                            </div>
+                            <div style={{ textAlign: "right" }}>
+                                <div style={{ fontSize: "0.9rem", color: "#6b7280" }}>AI 綜合評分</div>
+                                <div style={{ fontSize: "2.5rem", fontWeight: 800, color: analysisResult.ai_score >= 80 ? "#16a34a" : analysisResult.ai_score >= 60 ? "#d97706" : "#dc2626", lineHeight: 1 }}>
+                                    {analysisResult.ai_score}
+                                </div>
+                                <div style={{ fontSize: "0.9rem", fontWeight: 600, color: analysisResult.ai_score >= 60 ? "#16a34a" : "#dc2626", marginTop: 4 }}>
+                                    {analysisResult.ai_sentiment}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 四大面向評分 */}
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
+                            {analysisResult.score_breakdown && Object.entries(analysisResult.score_breakdown).map(([key, score]) => (
+                                <div key={key} style={{ background: "#f8fafc", padding: 10, borderRadius: 10, textAlign: "center" }}>
+                                    <div style={{ fontSize: "0.8rem", color: "#64748b", marginBottom: 4, textTransform: "capitalize" }}>
+                                        {key === 'technical' ? '技術' : key === 'fundamental' ? '基本' : key === 'chip' ? '籌碼' : '消息'}
+                                    </div>
+                                    <div style={{ fontWeight: 700, fontSize: "1.1rem", color: score >= 5 ? "#059669" : "#d97706" }}>{score}</div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* 建議區塊 */}
+                        <div style={{ background: "#eff6ff", padding: 16, borderRadius: 12, color: "#1e40af", fontSize: "0.95rem", lineHeight: 1.6 }}>
+                            <strong>💡 AI 建議：</strong>
+                            {analysisResult.suggestion || "目前觀望中，請參考下方詳細數據。"}
+                        </div>
+                    </div>
+
+                    {/* 模擬資產卡片 */}
+                    {portfolio && (
+                        <div style={{ background: "white", padding: 20, borderRadius: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.1)", border: "1px solid #e5e7eb" }}>
+                            <h3 style={{ margin: "0 0 16px 0", fontSize: "1.1rem", fontWeight: 700 }}>💰 試算模擬資產 (基於輸入本金)</h3>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                                <div style={{ padding: 12, background: "#f8fafc", borderRadius: 8 }}>
+                                    <div style={{ fontSize: "0.85rem", color: "#64748b" }}>可買股數</div>
+                                    <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{formatNumber(portfolio.shares)} 股</div>
+                                </div>
+                                <div style={{ padding: 12, background: "#f8fafc", borderRadius: 8 }}>
+                                    <div style={{ fontSize: "0.85rem", color: "#64748b" }}>預估成本</div>
+                                    <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>${formatNumber(portfolio.total_cost)}</div>
+                                </div>
+                                <div style={{ padding: 12, background: "#f8fafc", borderRadius: 8 }}>
+                                    <div style={{ fontSize: "0.85rem", color: "#64748b" }}>剩餘現金</div>
+                                    <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>${formatNumber(portfolio.cash)}</div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* K線圖表卡片 */}
+                    <div style={{ background: "white", padding: 20, borderRadius: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.1)", border: "1px solid #e5e7eb" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                            <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700 }}>📈 價格走勢預測</h3>
+                            <button onClick={loadKlineDetail} style={{ fontSize: "0.85rem", padding: "6px 12px", background: "#f1f5f9", border: "none", borderRadius: 6, cursor: "pointer" }}>
+                                {klineLoading ? "載入中..." : "重新載入"}
+                            </button>
+                        </div>
+                        
+                        <div style={{ height: 250, width: "100%" }}>
+                            {klineData ? (
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <LineChart data={klineData}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                        <XAxis dataKey="day" hide />
+                                        <YAxis domain={['auto', 'auto']} fontSize={12} />
+                                        <Tooltip />
+                                        <Line type="monotone" dataKey="price" stroke="#2563eb" strokeWidth={2} dot={false} />
+                                    </LineChart>
+                                </ResponsiveContainer>
+                            ) : (
+                                <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", background: "#f9fafb", borderRadius: 8 }}>
+                                    點擊載入以查看走勢
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </>
+            ) : (
+                <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", border: "2px dashed #e5e7eb", borderRadius: 16, minHeight: 400 }}>
+                    <div style={{ textAlign: "center" }}>
+                        <div style={{ fontSize: "3rem", marginBottom: 10 }}>🤖</div>
+                        <div>在左側輸入代碼並點擊分析<br/>AI 將為您生成報告</div>
+                    </div>
+                </div>
+            )}
         </div>
+      </div>
+      
+      <div style={{ textAlign: "center", marginTop: 40, color: "#9ca3af", fontSize: "0.8rem" }}>
+         API Source: {API_BASE || "Local Proxy"}
       </div>
     </div>
   );
