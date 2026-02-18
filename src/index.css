@@ -1,306 +1,236 @@
 /* ===============================
    檔案：stock-frontend/src/index.css
    目的：整站 UI 基礎美化 + RWD（手機/電腦）
-   不依賴任何外部套件
+   風格：深色科技感、玻璃擬態
    =============================== */
 
+/* 引入 Tailwind (如果你在上一步有安裝的話，保留這三行；沒安裝也沒關係，下方 CSS 會覆寫) */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
+  /* 背景色系：深藍/深紫/黑 */
   --bg0: #0b1220;
   --bg1: #0f1b33;
-  --card: rgba(255, 255, 255, 0.06);
-  --card2: rgba(255, 255, 255, 0.10);
-  --border: rgba(255, 255, 255, 0.14);
-  --text: rgba(255, 255, 255, 0.92);
-  --muted: rgba(255, 255, 255, 0.68);
-  --muted2: rgba(255, 255, 255, 0.55);
 
+  /* 玻璃擬態層級 */
+  --card: rgba(255, 255, 255, 0.05);
+  --card-hover: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.12);
+  
+  /* 文字色系 */
+  --text: rgba(255, 255, 255, 0.95);
+  --muted: rgba(255, 255, 255, 0.7);
+  --muted2: rgba(255, 255, 255, 0.5);
+
+  /* 品牌色與功能色 */
   --primary: #7c3aed;   /* 紫 */
   --primary2: #2563eb;  /* 藍 */
-  --good: #22c55e;
-  --warn: #f59e0b;
-  --bad: #ef4444;
+  --accent: #06b6d4;    /* 青 */
+  --good: #10b981;      /* 綠 */
+  --warn: #f59e0b;      /* 黃 */
+  --bad: #ef4444;       /* 紅 */
 
-  --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-  --shadow2: 0 10px 30px rgba(0, 0, 0, 0.35);
-
-  --r: 16px;
-  --r2: 22px;
+  /* 陰影與圓角 */
+  --shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.5);
+  --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+  --r: 12px;
+  --r-lg: 16px;
 }
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-
-html,
-body {
-  height: 100%;
+/* 全域設定 */
+html {
+  color-scheme: dark; /* 讓瀏覽器原生元件（卷軸、下拉選單）變黑 */
 }
 
 body {
   margin: 0;
+  min-height: 100vh;
   color: var(--text);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans TC",
-    "PingFang TC", "Microsoft JhengHei", Arial, sans-serif;
-
-  /* 背景：深色科技感 + 漸層 */
-  background:
-    radial-gradient(1200px 500px at 18% 0%, rgba(124, 58, 237, 0.35), transparent 60%),
-    radial-gradient(900px 500px at 95% 10%, rgba(37, 99, 235, 0.30), transparent 55%),
-    radial-gradient(700px 500px at 50% 110%, rgba(34, 197, 94, 0.10), transparent 60%),
-    linear-gradient(180deg, var(--bg0), var(--bg1));
-  overflow-x: hidden;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans TC", sans-serif;
+  -webkit-font-smoothing: antialiased; /* 字體平滑化 */
+  
+  /* 背景：多重漸層疊加 */
+  background-color: var(--bg0);
+  background-image: 
+    radial-gradient(circle at 15% 0%, rgba(124, 58, 237, 0.25), transparent 40%),
+    radial-gradient(circle at 85% 10%, rgba(37, 99, 235, 0.2), transparent 40%),
+    radial-gradient(circle at 50% 100%, rgba(6, 182, 212, 0.1), transparent 50%);
+  background-attachment: fixed; /* 背景固定，讓滾動更有質感 */
 }
 
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-button,
-input,
-select {
-  font: inherit;
-}
-
-#root {
-  min-height: 100%;
-}
+/* 讓連結與按鈕預設無底線 */
+a { text-decoration: none; color: inherit; }
+button { font-family: inherit; }
 
 /* ======================================
-   讓整站有一致的 container 感
-   （App.jsx 內如果有 inline style 也不衝突）
+   核心容器
    ====================================== */
 .container {
-  max-width: 1040px;
+  max-width: 1024px;
   margin: 0 auto;
-  padding: 18px 14px 60px;
+  padding: 20px 16px 80px; /* 底部留白避免手機版被瀏覽器 bar 擋住 */
 }
 
 /* ======================================
-   卡片視覺：玻璃擬態 + 邊框 + 陰影
+   卡片視覺 (Glassmorphism)
    ====================================== */
 .card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: var(--r2);
-  box-shadow: var(--shadow2);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(12px);       /* 磨砂玻璃效果 */
+  -webkit-backdrop-filter: blur(12px);
+  transition: transform 0.2s, border-color 0.2s;
+  overflow: hidden; /* 防止內容溢出圓角 */
 }
 
-.card-inner {
-  padding: 16px;
-}
-
-/* 標題/次標 */
-.h1 {
-  font-size: 22px;
-  font-weight: 900;
-  letter-spacing: 0.2px;
-}
-
-.h2 {
-  font-size: 16px;
-  font-weight: 900;
-  letter-spacing: 0.2px;
-}
-
-.p {
-  color: var(--muted);
-  line-height: 1.6;
+/* 卡片互動效果 (可選) */
+.card:hover {
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 /* ======================================
-   表單元件：更大、更好點擊
+   表單元件 (Input / Select)
    ====================================== */
-.input,
-.select {
+input, select, textarea {
   width: 100%;
-  padding: 12px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.06);
+  padding: 12px 14px;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
   color: var(--text);
+  font-size: 1rem;
   outline: none;
-  transition: transform 0.08s ease, border-color 0.2s ease, background 0.2s ease;
+  transition: all 0.2s;
 }
 
-.input::placeholder {
-  color: rgba(255, 255, 255, 0.45);
+input:focus, select:focus, textarea:focus {
+  border-color: var(--primary2);
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
 }
 
-.input:focus,
-.select:focus {
-  border-color: rgba(124, 58, 237, 0.7);
-  background: rgba(255, 255, 255, 0.08);
+/* 修正 Select 在深色模式下的箭頭與選項 */
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+  padding-right: 40px;
 }
-
-.select option {
-  color: #111;
+select option {
+  background-color: var(--bg1); /* 下拉選單背景色 */
+  color: white;
 }
 
 /* ======================================
-   按鈕：主按鈕/次按鈕/小按鈕
+   按鈕樣式
    ====================================== */
 .btn {
-  border: 0;
-  border-radius: 14px;
-  padding: 12px 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 20px;
+  border-radius: var(--r);
+  border: none;
+  font-weight: 700;
   cursor: pointer;
-  font-weight: 900;
+  transition: filter 0.2s, transform 0.1s;
+  background: linear-gradient(135deg, var(--primary2), var(--primary));
   color: white;
-  background: linear-gradient(135deg, var(--primary), var(--primary2));
-  box-shadow: var(--shadow2);
-  transition: transform 0.08s ease, filter 0.2s ease, opacity 0.2s ease;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
 }
 
-.btn:hover {
-  filter: brightness(1.06);
+.btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
 }
 
-.btn:active {
-  transform: translateY(1px);
+.btn:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .btn:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
+  filter: grayscale(0.5);
 }
 
+/* 次要按鈕 */
 .btn-ghost {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  box-shadow: none;
 }
-
-.btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.10);
-}
-
-.btn-sm {
-  padding: 10px 12px;
-  border-radius: 12px;
-  font-weight: 800;
+.btn-ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 /* ======================================
-   Tag / Badges（新聞分類、狀態）
+   文字與標題
+   ====================================== */
+h1, h2, h3, h4 {
+  margin-top: 0;
+  color: white;
+  line-height: 1.2;
+}
+
+.text-gradient {
+  background: linear-gradient(to right, #60a5fa, #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ======================================
+   狀態標籤 (Badges)
    ====================================== */
 .badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 900;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
 }
-
-.badge.good {
-  border-color: rgba(34, 197, 94, 0.55);
-  background: rgba(34, 197, 94, 0.12);
-}
-
-.badge.warn {
-  border-color: rgba(245, 158, 11, 0.55);
-  background: rgba(245, 158, 11, 0.12);
-}
-
-.badge.bad {
-  border-color: rgba(239, 68, 68, 0.55);
-  background: rgba(239, 68, 68, 0.12);
-}
+.badge-green { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+.badge-red { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+.badge-yellow { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
 
 /* ======================================
-   Alert（錯誤/成功提示）
-   ====================================== */
-.alert {
-  padding: 12px 12px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
-}
-
-.alert.success {
-  border-color: rgba(34, 197, 94, 0.55);
-  background: rgba(34, 197, 94, 0.12);
-}
-
-.alert.error {
-  border-color: rgba(239, 68, 68, 0.55);
-  background: rgba(239, 68, 68, 0.12);
-}
-
-.alert.info {
-  border-color: rgba(37, 99, 235, 0.55);
-  background: rgba(37, 99, 235, 0.12);
-}
-
-/* ======================================
-   小分隔線
-   ====================================== */
-.hr {
-  height: 1px;
-  background: rgba(255, 255, 255, 0.12);
-  border: 0;
-  margin: 14px 0;
-}
-
-/* ======================================
-   RWD：讓手機不擠、按鈕更大
+   RWD 手機版調整
    ====================================== */
 @media (max-width: 640px) {
   .container {
-    padding: 14px 12px 56px;
+    padding: 16px 12px 60px;
   }
-
-  .h1 {
-    font-size: 20px;
-  }
-
+  
+  /* 手機上按鈕好按一點 */
   .btn {
-    width: 100%;
+    width: 100%; 
+    padding: 14px;
   }
-
-  .btn-sm {
-    width: auto;
-  }
-
-  .input,
-  .select {
-    padding: 12px 12px;
-    border-radius: 14px;
+  
+  /* 手機上標題小一點 */
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.25rem; }
+  
+  /* 輸入框字體防縮小 */
+  input, select {
+    font-size: 16px; 
   }
 }
 
 /* ======================================
-   動畫：淡入（不會太花）
+   動畫 Utilities
    ====================================== */
-@keyframes fadeUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-.fade-up {
-  animation: fadeUp 0.35s ease both;
+.fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
 }
-
-/* ======================================
-   讓選取文字好看一點
-   ====================================== */
-::selection {
-  background: rgba(124, 58, 237, 0.35);
-}
-
