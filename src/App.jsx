@@ -4,12 +4,15 @@
 // ===============================
 
 import React, { useEffect, useState } from "react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'; // 預留給 K 線圖
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // =========================
-// API Base 設定
+// API Base 設定 (關鍵修改)
 // =========================
-const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
+// 邏輯：
+// 1. 如果 Vercel 有設定 VITE_API_URL，就用 Vercel 的設定 (連線到雲端後端)
+// 2. 如果沒設定 (例如你在本機開發)，就預設連線到 http://127.0.0.1:8000
+const API_BASE = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
 
 function apiUrl(path) {
   if (!path.startsWith("/")) path = "/" + path;
@@ -24,7 +27,7 @@ function formatNumber(value) {
   return value.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 25000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -39,7 +42,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
 async function warmUpBackend() {
   try {
     // 嘗試打一個輕量 API
-    await fetchWithTimeout(apiUrl("/health"), { method: "GET" }, 5000).catch(() => {});
+    await fetchWithTimeout(apiUrl("/"), { method: "GET" }, 5000).catch(() => {});
   } catch {
     // 忽略錯誤
   }
@@ -81,14 +84,18 @@ export default function App() {
     async function initData() {
       try {
         setNewsLoading(true);
-        await warmUpBackend(); // 喚醒
+        // 先不用 await warmUpBackend() 以免卡住太久，直接請求新聞
+        console.log(`正在連線到後端: ${API_BASE}`);
+        
         const res = await fetchWithTimeout(apiUrl("/api/news"), {}, 15000);
         if (res.ok) {
           const data = await res.json();
           setNewsList(Array.isArray(data) ? data : []);
+        } else {
+            console.warn("新聞載入失敗，狀態碼:", res.status);
         }
       } catch (err) {
-        console.error("新聞載入失敗", err);
+        console.error("無法連線到後端:", err);
       } finally {
         setNewsLoading(false);
       }
@@ -138,6 +145,7 @@ export default function App() {
     else if (duration === "long") durationLabel = "長期(1年)";
 
     try {
+      console.log(`發送分析請求至: ${apiUrl("/api/analyze")}`);
       const res = await fetchWithTimeout(
         apiUrl("/api/analyze"),
         {
@@ -150,7 +158,7 @@ export default function App() {
             duration: durationLabel,
           }),
         },
-        25000
+        60000 // 分析通常比較久，給 60 秒 Timeout
       );
 
       if (!res.ok) {
@@ -161,7 +169,7 @@ export default function App() {
       const data = await res.json();
       setAnalysisResult(data);
 
-      // 分析成功後，自動產生一個模擬資產結果 (因為移除了資料庫，這裡用前端計算或後端回傳的數據做簡單呈現)
+      // 分析成功後，自動產生一個模擬資產結果
       if (data.price && principal) {
         const qty = Math.floor(Number(principal) / data.price);
         const cost = qty * data.price;
@@ -175,8 +183,11 @@ export default function App() {
       }
 
     } catch (err) {
+      console.error("API Error:", err);
       if (err.name === "AbortError") {
         setAnalysisError("連線逾時，請檢查後端是否啟動，或稍後再試。");
+      } else if (err.message.includes("Failed to fetch")) {
+        setAnalysisError("無法連線到後端伺服器。請確認後端已啟動 (localhost:8000)。");
       } else {
         setAnalysisError(err.message || "發生未知錯誤");
       }
@@ -191,8 +202,7 @@ export default function App() {
   async function loadKlineDetail() {
     setKlineLoading(true);
     try {
-        // 這裡暫時模擬，因為後端 /api/kline 可能還沒實作完整
-        // 下一步我們會去後端補上這個 API
+        // 這裡暫時模擬
         await new Promise(r => setTimeout(r, 800)); 
         const mockData = Array.from({length: 30}, (_, i) => ({
             day: i,
@@ -447,7 +457,7 @@ export default function App() {
       </div>
       
       <div style={{ textAlign: "center", marginTop: 40, color: "#9ca3af", fontSize: "0.8rem" }}>
-         API Source: {API_BASE || "Local Proxy"}
+         API Source: {API_BASE}
       </div>
     </div>
   );
