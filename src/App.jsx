@@ -7,12 +7,12 @@ import React, { useEffect, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // =========================
-// API Base 設定 (關鍵修改)
+// API Base 設定 (已修改為連線 Render)
 // =========================
 // 邏輯：
-// 1. 如果 Vercel 有設定 VITE_API_URL，就用 Vercel 的設定 (連線到雲端後端)
-// 2. 如果沒設定 (例如你在本機開發)，就預設連線到 http://127.0.0.1:8000
-const API_BASE = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+// 1. 預設使用你剛剛提供的 Render 後端網址
+// 2. .replace(/\/$/, "") 是為了確保網址最後面沒有多餘的斜線
+const API_BASE = (import.meta.env.VITE_API_URL || "https://stock-backend-g011.onrender.com").replace(/\/$/, "");
 
 function apiUrl(path) {
   if (!path.startsWith("/")) path = "/" + path;
@@ -185,9 +185,9 @@ export default function App() {
     } catch (err) {
       console.error("API Error:", err);
       if (err.name === "AbortError") {
-        setAnalysisError("連線逾時，請檢查後端是否啟動，或稍後再試。");
+        setAnalysisError("連線逾時，請檢查後端是否啟動 (Render 休眠中，請再試一次)。");
       } else if (err.message.includes("Failed to fetch")) {
-        setAnalysisError("無法連線到後端伺服器。請確認後端已啟動 (localhost:8000)。");
+        setAnalysisError("無法連線到後端伺服器。");
       } else {
         setAnalysisError(err.message || "發生未知錯誤");
       }
@@ -457,7 +457,7 @@ export default function App() {
       </div>
       
       <div style={{ textAlign: "center", marginTop: 40, color: "#9ca3af", fontSize: "0.8rem" }}>
-         API Source: {API_BASE}
+          API Source: {API_BASE}
       </div>
     </div>
   );
