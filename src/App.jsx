@@ -4,9 +4,6 @@ import {
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis 
 } from 'recharts';
 
-// =========================
-// 1. API 配置
-// =========================
 const API_BASE = "https://stock-backend-g011.onrender.com"; 
 
 function apiUrl(path) {
@@ -18,7 +15,7 @@ export default function App() {
   const [symbol, setSymbol] = useState("2330.TW");
   const [principal, setPrincipal] = useState(100000);
   
-  // --- 持有期限狀態 (確保預設值與 option value 一致) ---
+  // --- 修改點 1：改為持有期限 (預設中線 mid) ---
   const [duration, setDuration] = useState("mid");
   
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -65,6 +62,7 @@ export default function App() {
           symbol: targetSymbol, 
           principal: Number(principal),
           strategy: "none",
+          // --- 修改點 2：將使用者選擇的持有期限傳給後端 ---
           duration: duration 
         }),
       });
@@ -99,11 +97,11 @@ export default function App() {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px" }}>
         
-        {/* 左側面板 */}
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          <section style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)", position: "relative", zIndex: 10 }}>
+          <section style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }}>
             <h3>🔍 投資參數</h3>
             
+            {/* 股票代碼 */}
             <div style={{ marginBottom: "10px" }}>
               <label style={{ fontSize: "12px", color: "#64748b" }}>股票代碼 (例: 2330.TW)</label>
               <input 
@@ -113,27 +111,13 @@ export default function App() {
               />
             </div>
 
-            {/* 修改點：優化後的下拉選單 */}
+            {/* --- 修改點 3：新增持有期限下拉選單 --- */}
             <div style={{ marginBottom: "10px" }}>
               <label style={{ fontSize: "12px", color: "#64748b" }}>預計持有期限</label>
               <select 
-                style={{ 
-                  width: "100%", 
-                  padding: "10px", 
-                  marginTop: "5px", 
-                  borderRadius: "6px", 
-                  border: "2px solid #3b82f6", // 加強邊框顏色提示可點擊
-                  background: "white",
-                  cursor: "pointer",
-                  display: "block",
-                  boxSizing: "border-box",
-                  fontSize: "14px"
-                }}
+                style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "6px", border: "1px solid #cbd5e1", background: "white" }}
                 value={duration}
-                onChange={(e) => {
-                  console.log("選擇的期限:", e.target.value);
-                  setDuration(e.target.value);
-                }}
+                onChange={(e) => setDuration(e.target.value)}
               >
                 <option value="short">短線 (1-2 週)</option>
                 <option value="mid">中線 (1-3 個月)</option>
@@ -141,6 +125,7 @@ export default function App() {
               </select>
             </div>
 
+            {/* 本金 */}
             <div style={{ marginBottom: "20px" }}>
               <label style={{ fontSize: "12px", color: "#64748b" }}>投資本金 (TWD)</label>
               <input 
@@ -160,25 +145,37 @@ export default function App() {
             </button>
           </section>
 
-          {/* 新聞列表保持原樣 */}
+          {/* 新聞列表 */}
           <section style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)", flex: 1 }}>
             <h3 style={{ display: "flex", justifyContent: "space-between" }}>
               📰 相關新聞 
               {newsLoading && <small style={{ fontSize: "12px", color: "#3b82f6" }}>載入中...</small>}
             </h3>
-            <div style={{ maxHeight: "400px", overflowY: "auto" }}>
-              {newsList.map((n, i) => (
-                <div key={i} style={{ padding: "10px", borderBottom: "1px solid #f1f5f9" }}>
-                  <div style={{ fontSize: "12px", color: "#2563eb" }}>{n.tag}</div>
-                  <div style={{ fontSize: "14px", fontWeight: "600" }}>{n.title}</div>
-                  <div style={{ fontSize: "11px", color: "#64748b" }}>{n.time}</div>
-                </div>
-              ))}
+            <div style={{ maxHeight: "500px", overflowY: "auto" }}>
+              {newsList.length > 0 ? (
+                newsList.map((n, i) => (
+                  <button
+                    key={i}
+                    onClick={() => n.url && window.open(n.url, "_blank", "noopener,noreferrer")}
+                    style={{ 
+                      width: "100%", textAlign: "left", padding: "12px", marginBottom: "10px", 
+                      background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: "8px", 
+                      cursor: "pointer"
+                    }}
+                  >
+                    <div style={{ fontSize: "10px", color: "#2563eb", fontWeight: "bold", marginBottom: "4px" }}>{n.tag}</div>
+                    <div style={{ fontSize: "14px", fontWeight: "600", color: "#1e293b", marginBottom: "4px" }}>{n.title}</div>
+                    <div style={{ fontSize: "11px", color: "#64748b" }}>{n.source} • {n.time}</div>
+                  </button>
+                ))
+              ) : (
+                <p style={{ textAlign: "center", color: "#94a3b8" }}>尚無新聞資料</p>
+              )}
             </div>
           </section>
         </div>
 
-        {/* 右側結果展示保持原樣 */}
+        {/* 右側：分析結果展示 */}
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           {!analysisResult ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#e2e8f0", borderRadius: "12px", color: "#64748b" }}>
@@ -186,30 +183,41 @@ export default function App() {
             </div>
           ) : (
             <>
+              {/* 分數區 */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
                 <div style={{ background: "white", padding: "20px", borderRadius: "12px", textAlign: "center" }}>
                   <h2 style={{ fontSize: "48px", margin: "10px 0", color: "#2563eb" }}>{analysisResult.ai_score}</h2>
-                  <p>綜合診斷：{analysisResult.ai_sentiment}</p>
+                  <p style={{ fontWeight: "bold", color: "#1e293b" }}>綜合診斷：{analysisResult.ai_sentiment}</p>
+                  <div style={{ marginTop: "20px", padding: "10px", background: "#eff6ff", borderRadius: "8px", textAlign: "left" }}>
+                    <div style={{ fontSize: "14px" }}>💡 建議進場價：<b style={{ color: "#059669" }}>${analysisResult.advice.buy_price}</b></div>
+                    <div style={{ fontSize: "14px" }}>🚀 目標獲利價：<b style={{ color: "#2563eb" }}>${analysisResult.advice.take_profit}</b></div>
+                    <div style={{ fontSize: "14px" }}>⚠️ 停損防禦價：<b style={{ color: "#dc2626" }}>${analysisResult.advice.stop_loss}</b></div>
+                  </div>
                 </div>
-                <div style={{ background: "white", padding: "10px", borderRadius: "12px" }}>
+                {/* 雷達圖 */}
+                <div style={{ background: "white", padding: "10px", borderRadius: "12px", display: "flex", justifyContent: "center" }}>
                   <ResponsiveContainer width="100%" height={250}>
-                    <RadarChart data={getRadarData()}>
+                    <RadarChart cx="50%" cy="50%" outerRadius="80%" data={getRadarData()}>
                       <PolarGrid />
                       <PolarAngleAxis dataKey="subject" />
-                      <Radar dataKey="score" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.6} />
+                      <PolarRadiusAxis angle={30} domain={[0, 100]} />
+                      <Radar name="評分" dataKey="score" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.6} />
                     </RadarChart>
                   </ResponsiveContainer>
                 </div>
               </div>
+
+              {/* 圖表 */}
               <div style={{ background: "white", padding: "20px", borderRadius: "12px", height: "400px" }}>
-                <ResponsiveContainer width="100%" height="100%">
+                <h3 style={{ margin: "0 0 20px 0" }}>📈 價格趨勢與預測 (30天)</h3>
+                <ResponsiveContainer width="100%" height="90%">
                   <LineChart data={analysisResult.chart_data.history.concat(analysisResult.chart_data.prediction)}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" hide />
+                    <XAxis dataKey="date" tick={{ fontSize: 10 }} hide />
                     <YAxis domain={['auto', 'auto']} />
                     <Tooltip />
-                    <Line type="monotone" dataKey="price" stroke="#1e293b" dot={false} />
-                    <Line type="monotone" dataKey="mid" stroke="#3b82f6" strokeDasharray="5 5" dot={false} />
+                    <Line type="monotone" dataKey="price" stroke="#1e293b" strokeWidth={2} dot={false} name="歷史價" />
+                    <Line type="monotone" dataKey="mid" stroke="#3b82f6" strokeDasharray="5 5" dot={false} name="AI預測" />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
