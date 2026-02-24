@@ -49,7 +49,7 @@ export default function App() {
   const [klineLoading, setKlineLoading] = useState(false);
   const [portfolio, setPortfolio] = useState(null);
 
-  // 初始化
+  // 初始化：載入收藏與新聞
   useEffect(() => {
     const savedFavs = JSON.parse(localStorage.getItem("stock_favorites") || "[]");
     setFavorites(savedFavs);
@@ -62,8 +62,11 @@ export default function App() {
           const data = await res.json();
           setNewsList(Array.isArray(data) ? data : []);
         }
-      } catch (err) { console.error("新聞載入失敗:", err); } 
-      finally { setNewsLoading(false); }
+      } catch (err) { 
+        console.error("新聞載入失敗:", err); 
+      } finally { 
+        setNewsLoading(false); 
+      }
     }
     fetchNews();
   }, []);
@@ -123,7 +126,6 @@ export default function App() {
     } finally { setKlineLoading(false); }
   }
 
-  // 格式化雷達圖數據
   const getRadarData = () => {
     if (!analysisResult || !analysisResult.score_breakdown) return [];
     const mapping = { technical: "技術", fundamental: "基本", chip: "籌碼", news: "消息" };
@@ -148,7 +150,7 @@ export default function App() {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
         
-        {/* 左側欄 */}
+        {/* 左側欄：操作與新聞 */}
         <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
           <section style={{ background: "white", padding: "20px", borderRadius: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
             <h3 style={{ marginTop: 0, marginBottom: "16px", color: "#374151", borderLeft: "4px solid #2563eb", paddingLeft: "10px" }}>📊 參數設定</h3>
@@ -173,38 +175,61 @@ export default function App() {
             </div>
           </section>
 
-          {/* 市場快訊 - 修復點擊連結 */}
+          {/* 市場快訊 - 強化連結點擊 */}
           <section style={{ background: "white", padding: "20px", borderRadius: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)", flex: 1 }}>
-            <h3 style={{ marginTop: 0 }}>📰 市場快訊</h3>
-            <div style={{ maxHeight: "400px", overflowY: "auto" }}>
-              {newsLoading ? <p>載入中...</p> : newsList.map((n, i) => (
-                <div key={i} style={{ padding: "12px 0", borderBottom: "1px solid #f3f4f6" }}>
-                  <a 
-                    href={n.link} 
-                    target="_blank" 
-                    rel="noopener noreferrer" 
-                    style={{ 
-                      textDecoration: "none", 
-                      color: "#1f2937", 
-                      fontSize: "0.95rem", 
-                      fontWeight: "600", 
-                      display: "block", 
-                      cursor: "pointer",
-                      lineHeight: "1.4"
-                    }}
-                    onMouseEnter={(e) => e.target.style.color = "#2563eb"}
-                    onMouseLeave={(e) => e.target.style.color = "#1f2937"}
-                  >
-                    {n.title}
-                  </a>
-                  <div style={{ fontSize: "0.75rem", color: "#9ca3af", marginTop: "6px" }}>{n.source}</div>
-                </div>
-              ))}
+            <h3 style={{ marginTop: 0, marginBottom: "15px" }}>📰 市場快訊</h3>
+            <div style={{ maxHeight: "400px", overflowY: "auto", paddingRight: "5px" }}>
+              {newsLoading ? (
+                <p style={{ textAlign: "center", color: "#9ca3af" }}>載入中...</p>
+              ) : newsList.length > 0 ? (
+                newsList.map((n, i) => (
+                  <div key={i} style={{ marginBottom: "10px" }}>
+                    <a 
+                      href={n.link} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      style={{ 
+                        textDecoration: "none", 
+                        color: "inherit", 
+                        display: "block",
+                        padding: "12px",
+                        backgroundColor: "#f8fafc",
+                        borderRadius: "10px",
+                        border: "1px solid transparent",
+                        transition: "all 0.2s ease",
+                        cursor: "pointer"
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = "#eff6ff";
+                        e.currentTarget.style.borderColor = "#bfdbfe";
+                        e.currentTarget.style.transform = "translateY(-2px)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = "#f8fafc";
+                        e.currentTarget.style.borderColor = "transparent";
+                        e.currentTarget.style.transform = "translateY(0)";
+                      }}
+                    >
+                      <div style={{ fontSize: "0.95rem", fontWeight: "600", color: "#1e293b", marginBottom: "6px", lineHeight: "1.4" }}>
+                        {n.title}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#e2e8f0", padding: "2px 8px", borderRadius: "4px" }}>
+                          {n.source}
+                        </span>
+                        <span style={{ fontSize: "0.7rem", color: "#3b82f6", fontWeight: "bold" }}>閱讀原文 →</span>
+                      </div>
+                    </a>
+                  </div>
+                ))
+              ) : (
+                <p style={{ textAlign: "center", color: "#9ca3af" }}>目前暫無新聞資料</p>
+              )}
             </div>
           </section>
         </div>
 
-        {/* 右側欄 */}
+        {/* 右側欄：分析結果 */}
         <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
           {analysisResult ? (
             <>
@@ -220,7 +245,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 雷達圖視覺化 */}
                 <div style={{ height: "220px", margin: "20px 0" }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <RadarChart cx="50%" cy="50%" outerRadius="80%" data={getRadarData()}>
