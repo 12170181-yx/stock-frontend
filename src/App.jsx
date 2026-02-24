@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis 
 } from 'recharts';
 
 // =========================
-// 1. API 配置 (根據你的 Render 網址)
+// 1. API 配置
 // =========================
 const API_BASE = "https://stock-backend-g011.onrender.com"; 
 
@@ -22,16 +22,18 @@ export default function App() {
   const [newsList, setNewsList] = useState([]);
   const [newsLoading, setNewsLoading] = useState(false);
 
-  // 初始化：載入預設新聞
-  useEffect(() => {
-    fetchNews("全球市場 財經");
-  }, []);
+  // 使用 useRef 紀錄當前的搜尋關鍵字，避免計時器抓錯主題
+  const currentQueryRef = useRef("全球市場 財經");
 
   // 取得新聞函式
   async function fetchNews(query) {
+    // 如果 query 為空，則使用預設
+    const searchQuery = query || "全球市場 財經";
+    currentQueryRef.current = searchQuery;
+
     setNewsLoading(true);
     try {
-      const res = await fetch(apiUrl(`/api/news?q=${encodeURIComponent(query)}&limit=10`));
+      const res = await fetch(apiUrl(`/api/news?q=${encodeURIComponent(searchQuery)}&limit=10`));
       if (res.ok) {
         const data = await res.json();
         setNewsList(data);
@@ -43,16 +45,34 @@ export default function App() {
     }
   }
 
+  // =========================
+  // 2. 自動更新邏輯 (每小時)
+  // =========================
+  useEffect(() => {
+    // 1. 初始載入
+    fetchNews("全球市場 財經");
+
+    // 2. 設定每小時 (3600000 ms) 自動更新一次
+    const timer = setInterval(() => {
+      console.log(`[${new Date().toLocaleTimeString()}] 執行自動新聞同步...`);
+      fetchNews(currentQueryRef.current);
+    }, 3600000);
+
+    // 3. 卸載時清除計時器
+    return () => clearInterval(timer);
+  }, []);
+
   // 執行分析函式
   const handleAnalyze = async () => {
     setAnalyzing(true);
     setAnalysisResult(null);
     try {
+      const targetSymbol = symbol.trim().toUpperCase();
       const res = await fetch(apiUrl("/api/analyze"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          symbol: symbol.trim().toUpperCase(), 
+          symbol: targetSymbol, 
           principal: Number(principal),
           strategy: "none",
           duration: "mid"
@@ -61,8 +81,9 @@ export default function App() {
       if (!res.ok) throw new Error("分析失敗");
       const data = await res.json();
       setAnalysisResult(data);
-      // 分析完後，同步更新該個股的新聞
-      fetchNews(symbol);
+      
+      // 分析完後，將目前搜尋主題切換為該股票，並同步更新新聞
+      fetchNews(targetSymbol);
     } catch (err) {
       alert(err.message);
     } finally {
@@ -86,6 +107,7 @@ export default function App() {
     <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "20px", fontFamily: "sans-serif", backgroundColor: "#f8fafc" }}>
       <header style={{ textAlign: "center", marginBottom: "30px", padding: "20px", background: "#1e293b", color: "white", borderRadius: "12px" }}>
         <h1>AI 股票戰情室</h1>
+        <p style={{ fontSize: "12px", opacity: 0.8 }}>新聞每小時自動同步更新</p>
       </header>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px" }}>
@@ -124,7 +146,7 @@ export default function App() {
           <section style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)", flex: 1 }}>
             <h3 style={{ display: "flex", justifyContent: "space-between" }}>
               📰 相關新聞 
-              {newsLoading && <small style={{ fontSize: "12px", color: "#3b82f6" }}>更新中...</small>}
+              {newsLoading && <small style={{ fontSize: "12px", color: "#3b82f6" }}>載入中...</small>}
             </h3>
             <div style={{ maxHeight: "500px", overflowY: "auto" }}>
               {newsList.length > 0 ? (
