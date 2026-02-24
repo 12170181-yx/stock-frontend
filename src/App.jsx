@@ -17,20 +17,19 @@ function apiUrl(path) {
 export default function App() {
   const [symbol, setSymbol] = useState("2330.TW");
   const [principal, setPrincipal] = useState(100000);
+  // --- 新增：買入時間狀態，預設為今天 ---
+  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
+  
   const [analysisResult, setAnalysisResult] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [newsList, setNewsList] = useState([]);
   const [newsLoading, setNewsLoading] = useState(false);
 
-  // 使用 useRef 紀錄當前的搜尋關鍵字，避免計時器抓錯主題
   const currentQueryRef = useRef("全球市場 財經");
 
-  // 取得新聞函式
   async function fetchNews(query) {
-    // 如果 query 為空，則使用預設
     const searchQuery = query || "全球市場 財經";
     currentQueryRef.current = searchQuery;
-
     setNewsLoading(true);
     try {
       const res = await fetch(apiUrl(`/api/news?q=${encodeURIComponent(searchQuery)}&limit=10`));
@@ -45,24 +44,14 @@ export default function App() {
     }
   }
 
-  // =========================
-  // 2. 自動更新邏輯 (每小時)
-  // =========================
   useEffect(() => {
-    // 1. 初始載入
     fetchNews("全球市場 財經");
-
-    // 2. 設定每小時 (3600000 ms) 自動更新一次
     const timer = setInterval(() => {
-      console.log(`[${new Date().toLocaleTimeString()}] 執行自動新聞同步...`);
       fetchNews(currentQueryRef.current);
     }, 3600000);
-
-    // 3. 卸載時清除計時器
     return () => clearInterval(timer);
   }, []);
 
-  // 執行分析函式
   const handleAnalyze = async () => {
     setAnalyzing(true);
     setAnalysisResult(null);
@@ -74,6 +63,7 @@ export default function App() {
         body: JSON.stringify({ 
           symbol: targetSymbol, 
           principal: Number(principal),
+          purchase_date: purchaseDate, // --- 將日期傳送至後端 ---
           strategy: "none",
           duration: "mid"
         }),
@@ -81,8 +71,6 @@ export default function App() {
       if (!res.ok) throw new Error("分析失敗");
       const data = await res.json();
       setAnalysisResult(data);
-      
-      // 分析完後，將目前搜尋主題切換為該股票，並同步更新新聞
       fetchNews(targetSymbol);
     } catch (err) {
       alert(err.message);
@@ -91,7 +79,6 @@ export default function App() {
     }
   };
 
-  // 雷達圖數據格式化
   const getRadarData = () => {
     if (!analysisResult) return [];
     const b = analysisResult.score_breakdown;
@@ -112,27 +99,41 @@ export default function App() {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px" }}>
         
-        {/* 左側：控制面板與新聞 */}
+        {/* 左側：控制面板 */}
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           <section style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }}>
             <h3>🔍 股票分析</h3>
+            
             <div style={{ marginBottom: "10px" }}>
               <label style={{ fontSize: "12px", color: "#64748b" }}>股票代碼 (例: 2330.TW)</label>
               <input 
-                style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "6px", border: "1px solid #cbd5e1", boxSizing: "border-box" }}
                 value={symbol} 
                 onChange={(e) => setSymbol(e.target.value)} 
               />
             </div>
+
+            {/* --- 新增：買入時間輸入區塊 --- */}
+            <div style={{ marginBottom: "10px" }}>
+              <label style={{ fontSize: "12px", color: "#64748b" }}>買入日期</label>
+              <input 
+                type="date"
+                style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "6px", border: "1px solid #cbd5e1", boxSizing: "border-box" }}
+                value={purchaseDate} 
+                onChange={(e) => setPurchaseDate(e.target.value)} 
+              />
+            </div>
+
             <div style={{ marginBottom: "20px" }}>
               <label style={{ fontSize: "12px", color: "#64748b" }}>投資本金 (TWD)</label>
               <input 
                 type="number"
-                style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "6px", border: "1px solid #cbd5e1", boxSizing: "border-box" }}
                 value={principal} 
                 onChange={(e) => setPrincipal(e.target.value)} 
               />
             </div>
+
             <button 
               onClick={handleAnalyze}
               disabled={analyzing}
@@ -159,8 +160,6 @@ export default function App() {
                       background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: "8px", 
                       cursor: "pointer", transition: "all 0.2s" 
                     }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = "#e2e8f0"}
-                    onMouseLeave={(e) => e.currentTarget.style.background = "#f1f5f9"}
                   >
                     <div style={{ fontSize: "10px", color: "#2563eb", fontWeight: "bold", marginBottom: "4px" }}>{n.tag}</div>
                     <div style={{ fontSize: "14px", fontWeight: "600", color: "#1e293b", marginBottom: "4px" }}>{n.title}</div>
@@ -178,11 +177,10 @@ export default function App() {
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           {!analysisResult ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#e2e8f0", borderRadius: "12px", color: "#64748b" }}>
-              請在左側輸入代號並點擊分析
+              請在左側輸入代號與日期並點擊分析
             </div>
           ) : (
             <>
-              {/* 分數與雷達圖 */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
                 <div style={{ background: "white", padding: "20px", borderRadius: "12px", textAlign: "center" }}>
                   <h2 style={{ fontSize: "48px", margin: "10px 0", color: "#2563eb" }}>{analysisResult.ai_score}</h2>
@@ -205,7 +203,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* K線圖表區 */}
               <div style={{ background: "white", padding: "20px", borderRadius: "12px", height: "400px" }}>
                 <h3 style={{ margin: "0 0 20px 0" }}>📈 價格趨勢與預測 (30天)</h3>
                 <ResponsiveContainer width="100%" height="90%">
