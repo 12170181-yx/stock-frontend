@@ -5,265 +5,199 @@ import {
 } from 'recharts';
 
 // =========================
-// API Base 設定
+// 1. API 配置 (根據你的 Render 網址)
 // =========================
-const API_BASE = (import.meta.env.VITE_API_URL || "https://stock-backend-g011.onrender.com").replace(/\/$/, "");
+const API_BASE = "https://stock-backend-g011.onrender.com"; 
 
 function apiUrl(path) {
-  if (!path.startsWith("/")) path = "/" + path;
-  return `${API_BASE}${path}`;
-}
-
-// =========================
-// 工具函式
-// =========================
-function formatNumber(value) {
-  if (value === null || value === undefined || isNaN(value)) return "-";
-  return value.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
-}
-
-async function fetchWithTimeout(url, options = {}, timeoutMs = 25000) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
-    return res;
-  } finally {
-    clearTimeout(id);
-  }
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  return `${API_BASE}${cleanPath}`;
 }
 
 export default function App() {
   const [symbol, setSymbol] = useState("2330.TW");
   const [principal, setPrincipal] = useState(100000);
-  const [strategy, setStrategy] = useState("none");
-  const [duration, setDuration] = useState("mid");
-  const [favorites, setFavorites] = useState([]);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analysisError, setAnalysisError] = useState("");
   const [analysisResult, setAnalysisResult] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
   const [newsList, setNewsList] = useState([]);
   const [newsLoading, setNewsLoading] = useState(false);
-  const [klineData, setKlineData] = useState(null);
-  const [klineLoading, setKlineLoading] = useState(false);
-  const [portfolio, setPortfolio] = useState(null);
 
+  // 初始化：載入預設新聞
   useEffect(() => {
-    const savedFavs = JSON.parse(localStorage.getItem("stock_favorites") || "[]");
-    setFavorites(savedFavs);
-
-    // 獲取真實新聞資料
-    async function fetchNews() {
-      setNewsLoading(true);
-      try {
-        const res = await fetchWithTimeout(apiUrl("/api/news"), {}, 15000);
-        if (res.ok) {
-          const data = await res.json();
-          // 確保後端回傳的是包含 title 和 link 的陣列
-          setNewsList(Array.isArray(data) ? data : []);
-        }
-      } catch (err) { 
-        console.error("新聞載入失敗:", err); 
-      } finally { 
-        setNewsLoading(false); 
-      }
-    }
-    fetchNews();
+    fetchNews("全球市場 財經");
   }, []);
 
-  function toggleFavorite() {
-    const s = symbol.trim().toUpperCase();
-    if (!s) return;
-    let newFavs = favorites.includes(s) ? favorites.filter(f => f !== s) : [...favorites, s];
-    setFavorites(newFavs);
-    localStorage.setItem("stock_favorites", JSON.stringify(newFavs));
-  }
-
-  const isFavorite = favorites.includes(symbol.trim().toUpperCase());
-
-  async function handleAnalyze() {
-    setAnalyzing(true);
-    setAnalysisError("");
-    setAnalysisResult(null);
-    setPortfolio(null);
-    setKlineData(null);
-
-    const s = symbol.trim().toUpperCase();
-    let durationLabel = duration === "day" ? "當沖(1日)" : duration === "short" ? "短期(5日)" : duration === "long" ? "長期(1年)" : "中期(60日)";
-
+  // 取得新聞函式
+  async function fetchNews(query) {
+    setNewsLoading(true);
     try {
-      const res = await fetchWithTimeout(apiUrl("/api/analyze"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol: s, principal: Number(principal), strategy, duration: durationLabel }),
-      }, 60000);
-
-      if (!res.ok) throw new Error("分析失敗，請檢查代碼");
-      const data = await res.json();
-      setAnalysisResult(data);
-
-      if (data.price && principal) {
-        const qty = Math.floor(Number(principal) / data.price);
-        setPortfolio({ shares: qty, total_cost: qty * data.price, cash: Number(principal) - (qty * data.price) });
+      const res = await fetch(apiUrl(`/api/news?q=${encodeURIComponent(query)}&limit=10`));
+      if (res.ok) {
+        const data = await res.json();
+        setNewsList(data);
       }
     } catch (err) {
-      setAnalysisError(err.message);
+      console.error("新聞抓取失敗:", err);
+    } finally {
+      setNewsLoading(false);
+    }
+  }
+
+  // 執行分析函式
+  const handleAnalyze = async () => {
+    setAnalyzing(true);
+    setAnalysisResult(null);
+    try {
+      const res = await fetch(apiUrl("/api/analyze"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          symbol: symbol.trim().toUpperCase(), 
+          principal: Number(principal),
+          strategy: "none",
+          duration: "mid"
+        }),
+      });
+      if (!res.ok) throw new Error("分析失敗");
+      const data = await res.json();
+      setAnalysisResult(data);
+      // 分析完後，同步更新該個股的新聞
+      fetchNews(symbol);
+    } catch (err) {
+      alert(err.message);
     } finally {
       setAnalyzing(false);
     }
-  }
+  };
 
-  async function loadKlineDetail() {
-    if (!analysisResult) return;
-    setKlineLoading(true);
-    try {
-      await new Promise(r => setTimeout(r, 600));
-      const mockData = Array.from({length: 20}, (_, i) => ({
-        day: i + 1,
-        price: (analysisResult.price * (0.95 + Math.random() * 0.1))
-      }));
-      setKlineData(mockData);
-    } finally { setKlineLoading(false); }
-  }
-
+  // 雷達圖數據格式化
   const getRadarData = () => {
-    if (!analysisResult || !analysisResult.score_breakdown) return [];
-    const mapping = { technical: "技術", fundamental: "基本", chip: "籌碼", news: "消息" };
-    return Object.entries(analysisResult.score_breakdown).map(([key, value]) => ({
-      subject: mapping[key] || key,
-      score: value,
-      fullMark: 10
-    }));
+    if (!analysisResult) return [];
+    const b = analysisResult.score_breakdown;
+    return [
+      { subject: "技術面", score: b.technical.score },
+      { subject: "基本面", score: b.fundamental.score },
+      { subject: "籌碼面", score: b.chip.score },
+      { subject: "消息面", score: b.news.score },
+    ];
   };
 
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px", backgroundColor: "#f3f4f6", minHeight: "100vh", fontFamily: "sans-serif" }}>
-      
-      {/* Header */}
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, padding: "20px 24px", background: "linear-gradient(135deg, #1e293b 0%, #334155 100%)", borderRadius: "16px", color: "white" }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: "1.6rem" }}>🚀 AI 投資戰情室</h1>
-          <p style={{ margin: "4px 0 0", opacity: 0.7, fontSize: "0.85rem" }}>即時真實數據分析</p>
-        </div>
+    <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "20px", fontFamily: "sans-serif", backgroundColor: "#f8fafc" }}>
+      <header style={{ textAlign: "center", marginBottom: "30px", padding: "20px", background: "#1e293b", color: "white", borderRadius: "12px" }}>
+        <h1>AI 股票戰情室</h1>
       </header>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px" }}>
         
-        {/* 左側欄 */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-          <section style={{ background: "white", padding: "20px", borderRadius: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-            <h3 style={{ marginTop: 0, marginBottom: "16px", color: "#374151", borderLeft: "4px solid #2563eb", paddingLeft: "10px" }}>📊 參數設定</h3>
-            <div style={{ display: "grid", gap: "15px" }}>
-              <div style={{ display: "flex", gap: "8px" }}>
-                <input value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} style={{ flex: 1, padding: "10px", borderRadius: "8px", border: "1px solid #d1d5db" }} />
-                <button onClick={toggleFavorite} style={{ padding: "0 15px", borderRadius: "8px", border: "1px solid #d1d5db", background: isFavorite ? "#fffbeb" : "white", color: isFavorite ? "#f59e0b" : "#9ca3af", cursor: "pointer" }}>{isFavorite ? "★" : "☆"}</button>
-              </div>
-              <input type="number" value={principal} onChange={(e) => setPrincipal(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #d1d5db" }} />
-              <button onClick={handleAnalyze} disabled={analyzing} style={{ width: "100%", padding: "14px", borderRadius: "8px", border: "none", background: analyzing ? "#94a3b8" : "#2563eb", color: "white", fontWeight: "700", cursor: "pointer" }}>
-                {analyzing ? "⚡ 分析中..." : "開始 AI 分析"}
-              </button>
+        {/* 左側：控制面板與新聞 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <section style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }}>
+            <h3>🔍 股票分析</h3>
+            <div style={{ marginBottom: "10px" }}>
+              <label style={{ fontSize: "12px", color: "#64748b" }}>股票代碼 (例: 2330.TW)</label>
+              <input 
+                style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                value={symbol} 
+                onChange={(e) => setSymbol(e.target.value)} 
+              />
             </div>
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{ fontSize: "12px", color: "#64748b" }}>投資本金 (TWD)</label>
+              <input 
+                type="number"
+                style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                value={principal} 
+                onChange={(e) => setPrincipal(e.target.value)} 
+              />
+            </div>
+            <button 
+              onClick={handleAnalyze}
+              disabled={analyzing}
+              style={{ width: "100%", padding: "12px", background: "#3b82f6", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}
+            >
+              {analyzing ? "分析中..." : "開始 AI 診斷"}
+            </button>
           </section>
 
-          {/* 重要：市場真實新聞顯示區 */}
-          <section style={{ background: "white", padding: "20px", borderRadius: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)", flex: 1 }}>
-            <h3 style={{ marginTop: 0, marginBottom: "15px" }}>📰 即時市場新聞</h3>
-            <div style={{ maxHeight: "500px", overflowY: "auto", paddingRight: "5px" }}>
-              {newsLoading ? (
-                <p style={{ textAlign: "center", color: "#9ca3af" }}>新聞抓取中...</p>
-              ) : newsList.length > 0 ? (
+          {/* 新聞列表區塊 */}
+          <section style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)", flex: 1 }}>
+            <h3 style={{ display: "flex", justifyContent: "space-between" }}>
+              📰 相關新聞 
+              {newsLoading && <small style={{ fontSize: "12px", color: "#3b82f6" }}>更新中...</small>}
+            </h3>
+            <div style={{ maxHeight: "500px", overflowY: "auto" }}>
+              {newsList.length > 0 ? (
                 newsList.map((n, i) => (
-                  <div key={i} style={{ marginBottom: "12px" }}>
-                    {/* 點擊連到真實新聞的超連結 */}
-                    <a 
-                      href={n.link} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      style={{ 
-                        textDecoration: "none", 
-                        display: "block",
-                        padding: "12px",
-                        backgroundColor: "#f8fafc",
-                        borderRadius: "10px",
-                        border: "1px solid #e2e8f0",
-                        transition: "all 0.2s ease"
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.backgroundColor = "#f1f5f9";
-                        e.currentTarget.style.borderColor = "#3b82f6";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor = "#f8fafc";
-                        e.currentTarget.style.borderColor = "#e2e8f0";
-                      }}
-                    >
-                      <div style={{ fontSize: "0.95rem", fontWeight: "600", color: "#1e293b", lineHeight: "1.4", marginBottom: "4px" }}>
-                        {n.title}
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontSize: "0.75rem", color: "#64748b" }}>{n.source || "市場消息"}</span>
-                        <span style={{ fontSize: "0.7rem", color: "#3b82f6", fontWeight: "bold" }}>閱讀更多 →</span>
-                      </div>
-                    </a>
-                  </div>
+                  <button
+                    key={i}
+                    onClick={() => n.url && window.open(n.url, "_blank", "noopener,noreferrer")}
+                    style={{ 
+                      width: "100%", textAlign: "left", padding: "12px", marginBottom: "10px", 
+                      background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: "8px", 
+                      cursor: "pointer", transition: "all 0.2s" 
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = "#e2e8f0"}
+                    onMouseLeave={(e) => e.currentTarget.style.background = "#f1f5f9"}
+                  >
+                    <div style={{ fontSize: "10px", color: "#2563eb", fontWeight: "bold", marginBottom: "4px" }}>{n.tag}</div>
+                    <div style={{ fontSize: "14px", fontWeight: "600", color: "#1e293b", marginBottom: "4px" }}>{n.title}</div>
+                    <div style={{ fontSize: "11px", color: "#64748b" }}>{n.source} • {n.time}</div>
+                  </button>
                 ))
               ) : (
-                <p style={{ textAlign: "center", color: "#9ca3af" }}>暫無相關新聞</p>
+                <p style={{ textAlign: "center", color: "#94a3b8" }}>尚無新聞資料</p>
               )}
             </div>
           </section>
         </div>
 
-        {/* 右側欄：分析結果 */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-          {analysisResult ? (
+        {/* 右側：分析結果展示 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          {!analysisResult ? (
+            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#e2e8f0", borderRadius: "12px", color: "#64748b" }}>
+              請在左側輸入代號並點擊分析
+            </div>
+          ) : (
             <>
-              <div style={{ background: "white", padding: "24px", borderRadius: "16px", boxShadow: "0 4px 6px rgba(0,0,0,0.1)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <div>
-                    <h2 style={{ margin: 0, fontSize: "2rem" }}>{analysisResult.symbol}</h2>
-                    <p style={{ color: "#2563eb", fontSize: "1.4rem", fontWeight: "bold", margin: "5px 0" }}>${formatNumber(analysisResult.price)}</p>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <span style={{ fontSize: "0.8rem", color: "#6b7280", fontWeight: "bold" }}>AI 綜合評分</span>
-                    <div style={{ fontSize: "3rem", fontWeight: "900", color: analysisResult.ai_score >= 60 ? "#059669" : "#dc2626" }}>{analysisResult.ai_score}</div>
+              {/* 分數與雷達圖 */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+                <div style={{ background: "white", padding: "20px", borderRadius: "12px", textAlign: "center" }}>
+                  <h2 style={{ fontSize: "48px", margin: "10px 0", color: "#2563eb" }}>{analysisResult.ai_score}</h2>
+                  <p style={{ fontWeight: "bold", color: "#1e293b" }}>綜合診斷：{analysisResult.ai_sentiment}</p>
+                  <div style={{ marginTop: "20px", padding: "10px", background: "#eff6ff", borderRadius: "8px", textAlign: "left" }}>
+                    <div style={{ fontSize: "14px" }}>💡 建議進場價：<b style={{ color: "#059669" }}>${analysisResult.advice.buy_price}</b></div>
+                    <div style={{ fontSize: "14px" }}>🚀 目標獲利價：<b style={{ color: "#2563eb" }}>${analysisResult.advice.take_profit}</b></div>
+                    <div style={{ fontSize: "14px" }}>⚠️ 停損防禦價：<b style={{ color: "#dc2626" }}>${analysisResult.advice.stop_loss}</b></div>
                   </div>
                 </div>
-
-                <div style={{ height: "220px", margin: "20px 0" }}>
-                  <ResponsiveContainer width="100%" height="100%">
+                <div style={{ background: "white", padding: "10px", borderRadius: "12px", display: "flex", justifyContent: "center" }}>
+                  <ResponsiveContainer width="100%" height={250}>
                     <RadarChart cx="50%" cy="50%" outerRadius="80%" data={getRadarData()}>
-                      <PolarGrid stroke="#e5e7eb" />
-                      <PolarAngleAxis dataKey="subject" tick={{ fill: "#6b7280", fontSize: 12 }} />
-                      <PolarRadiusAxis angle={30} domain={[0, 10]} tick={false} axisLine={false} />
-                      <Radar name="評分" dataKey="score" stroke="#2563eb" fill="#3b82f6" fillOpacity={0.6} />
+                      <PolarGrid />
+                      <PolarAngleAxis dataKey="subject" />
+                      <PolarRadiusAxis angle={30} domain={[0, 100]} />
+                      <Radar name="評分" dataKey="score" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.6} />
                     </RadarChart>
                   </ResponsiveContainer>
                 </div>
-
-                <div style={{ background: "#f0f9ff", padding: "15px", borderRadius: "12px", borderLeft: "4px solid #0ea5e9" }}>
-                  <strong style={{ color: "#0369a1" }}>💡 AI 建議：</strong> 
-                  <span style={{ color: "#0c4a6e", lineHeight: "1.6" }}>{analysisResult.suggestion}</span>
-                </div>
               </div>
 
-              <div style={{ background: "white", padding: "20px", borderRadius: "16px", height: "300px" }}>
-                <h3 style={{ margin: 0, fontSize: "1rem", marginBottom: "10px" }}>📈 趨勢預測模擬</h3>
-                <ResponsiveContainer width="100%" height="85%">
-                  <LineChart data={klineData || []}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="day" hide />
-                    <YAxis domain={['auto', 'auto']} fontSize={10} axisLine={false} />
+              {/* K線圖表區 */}
+              <div style={{ background: "white", padding: "20px", borderRadius: "12px", height: "400px" }}>
+                <h3 style={{ margin: "0 0 20px 0" }}>📈 價格趨勢與預測 (30天)</h3>
+                <ResponsiveContainer width="100%" height="90%">
+                  <LineChart data={analysisResult.chart_data.history.concat(analysisResult.chart_data.prediction)}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" tick={{ fontSize: 10 }} hide />
+                    <YAxis domain={['auto', 'auto']} />
                     <Tooltip />
-                    <Line type="monotone" dataKey="price" stroke="#2563eb" strokeWidth={3} dot={false} />
+                    <Line type="monotone" dataKey="price" stroke="#1e293b" strokeWidth={2} dot={false} name="歷史價" />
+                    <Line type="monotone" dataKey="mid" stroke="#3b82f6" strokeDasharray="5 5" dot={false} name="AI預測" />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             </>
-          ) : (
-            <div style={{ height: "100%", minHeight: "500px", background: "white", borderRadius: "16px", border: "2px dashed #d1d5db", display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", textAlign: "center" }}>
-              <p>請輸入代碼並點擊分析<br/>AI 將抓取真實新聞與數據</p>
-            </div>
           )}
         </div>
       </div>
