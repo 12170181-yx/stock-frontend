@@ -4,9 +4,6 @@ import {
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis 
 } from 'recharts';
 
-// =========================
-// 1. API 配置
-// =========================
 const API_BASE = "https://stock-backend-g011.onrender.com"; 
 
 function apiUrl(path) {
@@ -17,8 +14,9 @@ function apiUrl(path) {
 export default function App() {
   const [symbol, setSymbol] = useState("2330.TW");
   const [principal, setPrincipal] = useState(100000);
-  // --- 新增：買入時間狀態，預設為今天 ---
-  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  // --- 修改點 1：改為持有期限 (預設中線 mid) ---
+  const [duration, setDuration] = useState("mid");
   
   const [analysisResult, setAnalysisResult] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -63,9 +61,9 @@ export default function App() {
         body: JSON.stringify({ 
           symbol: targetSymbol, 
           principal: Number(principal),
-          purchase_date: purchaseDate, // --- 將日期傳送至後端 ---
           strategy: "none",
-          duration: "mid"
+          // --- 修改點 2：將使用者選擇的持有期限傳給後端 ---
+          duration: duration 
         }),
       });
       if (!res.ok) throw new Error("分析失敗");
@@ -99,11 +97,11 @@ export default function App() {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px" }}>
         
-        {/* 左側：控制面板 */}
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           <section style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }}>
-            <h3>🔍 股票分析</h3>
+            <h3>🔍 投資參數</h3>
             
+            {/* 股票代碼 */}
             <div style={{ marginBottom: "10px" }}>
               <label style={{ fontSize: "12px", color: "#64748b" }}>股票代碼 (例: 2330.TW)</label>
               <input 
@@ -113,17 +111,21 @@ export default function App() {
               />
             </div>
 
-            {/* --- 新增：買入時間輸入區塊 --- */}
+            {/* --- 修改點 3：新增持有期限下拉選單 --- */}
             <div style={{ marginBottom: "10px" }}>
-              <label style={{ fontSize: "12px", color: "#64748b" }}>買入日期</label>
-              <input 
-                type="date"
-                style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "6px", border: "1px solid #cbd5e1", boxSizing: "border-box" }}
-                value={purchaseDate} 
-                onChange={(e) => setPurchaseDate(e.target.value)} 
-              />
+              <label style={{ fontSize: "12px", color: "#64748b" }}>預計持有期限</label>
+              <select 
+                style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "6px", border: "1px solid #cbd5e1", background: "white" }}
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+              >
+                <option value="short">短線 (1-2 週)</option>
+                <option value="mid">中線 (1-3 個月)</option>
+                <option value="long">長線 (半年以上)</option>
+              </select>
             </div>
 
+            {/* 本金 */}
             <div style={{ marginBottom: "20px" }}>
               <label style={{ fontSize: "12px", color: "#64748b" }}>投資本金 (TWD)</label>
               <input 
@@ -143,7 +145,7 @@ export default function App() {
             </button>
           </section>
 
-          {/* 新聞列表區塊 */}
+          {/* 新聞列表 */}
           <section style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)", flex: 1 }}>
             <h3 style={{ display: "flex", justifyContent: "space-between" }}>
               📰 相關新聞 
@@ -158,7 +160,7 @@ export default function App() {
                     style={{ 
                       width: "100%", textAlign: "left", padding: "12px", marginBottom: "10px", 
                       background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: "8px", 
-                      cursor: "pointer", transition: "all 0.2s" 
+                      cursor: "pointer"
                     }}
                   >
                     <div style={{ fontSize: "10px", color: "#2563eb", fontWeight: "bold", marginBottom: "4px" }}>{n.tag}</div>
@@ -177,10 +179,11 @@ export default function App() {
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           {!analysisResult ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#e2e8f0", borderRadius: "12px", color: "#64748b" }}>
-              請在左側輸入代號與日期並點擊分析
+              請設定參數並點擊分析
             </div>
           ) : (
             <>
+              {/* 分數區 */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
                 <div style={{ background: "white", padding: "20px", borderRadius: "12px", textAlign: "center" }}>
                   <h2 style={{ fontSize: "48px", margin: "10px 0", color: "#2563eb" }}>{analysisResult.ai_score}</h2>
@@ -191,6 +194,7 @@ export default function App() {
                     <div style={{ fontSize: "14px" }}>⚠️ 停損防禦價：<b style={{ color: "#dc2626" }}>${analysisResult.advice.stop_loss}</b></div>
                   </div>
                 </div>
+                {/* 雷達圖 */}
                 <div style={{ background: "white", padding: "10px", borderRadius: "12px", display: "flex", justifyContent: "center" }}>
                   <ResponsiveContainer width="100%" height={250}>
                     <RadarChart cx="50%" cy="50%" outerRadius="80%" data={getRadarData()}>
@@ -203,6 +207,7 @@ export default function App() {
                 </div>
               </div>
 
+              {/* 圖表 */}
               <div style={{ background: "white", padding: "20px", borderRadius: "12px", height: "400px" }}>
                 <h3 style={{ margin: "0 0 20px 0" }}>📈 價格趨勢與預測 (30天)</h3>
                 <ResponsiveContainer width="100%" height="90%">
