@@ -25,6 +25,7 @@ export default function App() {
   
   const [newsList, setNewsList] = useState([]);
   const [newsLoading, setNewsLoading] = useState(false);
+  const [newsSearchInput, setNewsSearchInput] = useState(""); // ✅ 新增：搜尋框狀態
 
   // 回測與投資組合狀態
   const [backtestResult, setBacktestResult] = useState(null);
@@ -53,16 +54,16 @@ export default function App() {
 
   const roiData = calculateROI();
 
-  // --- 2️⃣ 新聞抓取邏輯 ---
+  // --- 2️⃣ 新聞抓取邏輯 (✅ 已更新為串接新的 Search API) ---
   async function fetchNews(query) {
     const searchQuery = query || "全球市場 財經";
     currentQueryRef.current = searchQuery;
     setNewsLoading(true);
     try {
-      const res = await fetch(apiUrl(`/api/news?q=${encodeURIComponent(searchQuery)}&limit=10`));
+      const res = await fetch(apiUrl(`/api/news/search/?q=${encodeURIComponent(searchQuery)}&is_tw=true`));
       if (res.ok) {
         const data = await res.json();
-        setNewsList(data);
+        setNewsList(data.news || []);
       }
     } catch (err) {
       console.error("新聞抓取失敗:", err);
@@ -104,7 +105,7 @@ export default function App() {
       
       const data = await res.json();
       setAnalysisResult(data);
-      fetchNews(targetSymbol);
+      fetchNews(targetSymbol); // 分析完自動搜尋該股票新聞
     } catch (err) {
       alert(`⚠️ 發生錯誤: ${err.message}`);
     } finally {
@@ -248,27 +249,43 @@ export default function App() {
               </button>
             </section>
 
-            <section style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", flex: 1 }}>
-              <h3 style={{ display: "flex", justifyContent: "space-between", marginTop: 0, color: "#0f172a" }}>
-                📰 即時輿情
-                {newsLoading && <small style={{ fontSize: "12px", color: "#3b82f6", fontWeight: "normal" }}>🔄 同步中...</small>}
+            <section style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", flex: 1, display: "flex", flexDirection: "column" }}>
+              <h3 style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 0, marginBottom: "15px", color: "#0f172a" }}>
+                <span>📰 即時輿情 {newsLoading && <small style={{ fontSize: "12px", color: "#3b82f6", fontWeight: "normal" }}>🔄 同步中...</small>}</span>
               </h3>
-              <div style={{ maxHeight: "400px", overflowY: "auto", paddingRight: "5px" }}>
+              
+              {/* ✅ 新增：自訂新聞搜尋框 */}
+              <form onSubmit={(e) => { e.preventDefault(); fetchNews(newsSearchInput); }} style={{ display: "flex", gap: "8px", marginBottom: "15px" }}>
+                <input 
+                  value={newsSearchInput} 
+                  onChange={(e) => setNewsSearchInput(e.target.value)} 
+                  placeholder="搜尋個股或財經關鍵字..." 
+                  style={{ ...inputStyle, marginTop: 0, padding: "10px", flex: 1 }} 
+                />
+                <button type="submit" style={{ padding: "10px 16px", background: "#3b82f6", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" }}>
+                  搜尋
+                </button>
+              </form>
+
+              <div style={{ maxHeight: "350px", overflowY: "auto", paddingRight: "5px" }}>
                 {newsList.length > 0 ? (
                   newsList.map((n, i) => {
-                    const tagColors = getTagColor(n.tag);
+                    const tagColors = getTagColor("焦點");
                     return (
-                      <div key={i} onClick={() => n.url && window.open(n.url, "_blank")}
+                      <div key={i} onClick={() => n.link && window.open(n.link, "_blank")}
                         style={{ 
                           padding: "12px", marginBottom: "10px", background: "#f8fafc", border: "1px solid #e2e8f0", 
-                          borderRadius: "8px", cursor: "pointer"
+                          borderRadius: "8px", cursor: "pointer", transition: "all 0.2s"
                         }}
+                        onMouseEnter={(e) => e.currentTarget.style.borderColor = "#93c5fd"}
+                        onMouseLeave={(e) => e.currentTarget.style.borderColor = "#e2e8f0"}
                       >
-                        <span style={{ fontSize: "10px", fontWeight: "bold", marginBottom: "6px", padding: "2px 6px", borderRadius: "4px", backgroundColor: tagColors.bg, color: tagColors.text }}>
-                          {n.tag}
+                        <span style={{ fontSize: "10px", fontWeight: "bold", marginBottom: "6px", padding: "2px 6px", borderRadius: "4px", backgroundColor: tagColors.bg, color: tagColors.text, display: "inline-block" }}>
+                          焦點新聞
                         </span>
                         <div style={{ fontSize: "13px", fontWeight: "600", color: "#1e293b", margin: "6px 0", lineHeight: "1.4" }}>{n.title}</div>
-                        <div style={{ fontSize: "11px", color: "#64748b" }}>{n.source} • {n.time}</div>
+                        {/* ✅ 修正：使用後端新變數 n.link 與 n.published */}
+                        <div style={{ fontSize: "11px", color: "#64748b" }}>Google News • {n.published}</div>
                       </div>
                     )
                   })
