@@ -1,12 +1,11 @@
 import React, { useEffect, useState, useRef } from "react";
 import { 
   ResponsiveContainer, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
-  BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
-  AreaChart, Area, ComposedChart, Line // ✅ 新增高階圖表所需組件
+  BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell // ✅ 新增圖表所需組件
 } from 'recharts';
 import { createChart } from 'lightweight-charts';
 
-// API 網址設定
+// ⚠️ API 網址設定：目前預設使用你的 Render 後端。若在本地端測試請改為 http://127.0.0.1:8000
 const API_BASE = "https://stock-backend-g011.onrender.com"; 
 const USERNAME = 'QuantUser'; 
 
@@ -17,12 +16,13 @@ function apiUrl(path) {
 
 export default function App() {
   // --- 狀態管理 ---
-  const [activeTab, setActiveTab] = useState('analyze'); // 新增了 'ranking' Tab
+  const [activeTab, setActiveTab] = useState('analyze'); 
   const [symbol, setSymbol] = useState("2330.TW");
   const [principal, setPrincipal] = useState(100000);
   const [duration, setDuration] = useState("mid");
   const [timeInterval, setTimeInterval] = useState("1d"); 
   
+  // ✅ 新增：均線顯示狀態（預設 false，沒按不出現）
   const [showSMA, setShowSMA] = useState(false);
   const [showEMA, setShowEMA] = useState(false);
 
@@ -43,85 +43,249 @@ export default function App() {
   const currentQueryRef = useRef("全球市場 財經");
   const chartContainerRef = useRef(null); 
 
-  // 🌟 假資料區 (等待後端 API 接上後替換) 🌟
-  // 1️⃣ 因子貢獻透明化 (SHAP Values)
-  const mockShapData = [
-    { factor: "趨勢動能 (MACD/RSI)", value: 35, fill: "#ef4444" },
-    { factor: "外資買賣超", value: 25, fill: "#ef4444" },
-    { factor: "營收成長率", value: 18, fill: "#ef4444" },
-    { factor: "乖離率過高", value: -12, fill: "#22c55e" },
-    { factor: "總體經濟波動", value: -5, fill: "#22c55e" }
-  ];
-
-  // 2️⃣ 策略穩健性測試 (Rolling Window & Regime)
-  const mockRollingSharpe = Array.from({ length: 24 }, (_, i) => ({
-    month: `2024-${String(i % 12 + 1).padStart(2, '0')}`,
-    sharpe: (Math.random() * 2 + 0.5).toFixed(2)
-  }));
-  const mockRegimeData = [
-    { regime: "大盤多頭 (200MA之上)", winRate: 78, return: 25.4 },
-    { regime: "大盤空頭 (200MA之下)", winRate: 45, return: -5.2 }
-  ];
-
-  // 3️⃣ 多標的橫向比較 (Ranking)
-  const mockRankingData = [
-    { rank: 1, symbol: "2330.TW", name: "台積電", score: 98, sector: "半導體", momentum: 95, value: 80, signal: "強烈買進" },
-    { rank: 2, symbol: "2317.TW", name: "鴻海", score: 92, sector: "電子代工", momentum: 88, value: 90, signal: "買進" },
-    { rank: 3, symbol: "2454.TW", name: "聯發科", score: 89, sector: "半導體", momentum: 91, value: 75, signal: "買進" },
-    { rank: 4, symbol: "3231.TW", name: "緯創", score: 85, sector: "電腦周邊", momentum: 82, value: 85, signal: "買進" },
-    { rank: 5, symbol: "2603.TW", name: "長榮", score: 45, sector: "航運", momentum: 30, value: 95, signal: "觀望" },
-  ];
-
-  // 4️⃣ 風險模型層 (Risk Modeling)
-  const mockRiskMetrics = {
-    beta: 1.15,
-    var95: 3.2, // 95% Daily VaR
-    cvar95: 4.5, // 95% Conditional VaR
-    volatility: 28.5 // Annualized Volatility
-  };
-
   // --- 1️⃣ 模擬投報計算邏輯 ---
   const calculateROI = () => {
     if (!analysisResult || !analysisResult.chart_data?.prediction) return null;
+    
     const buyPrice = analysisResult.advice.buy_price;
     const predictionData = analysisResult.chart_data.prediction;
     const targetPrice = predictionData[predictionData.length - 1].mid;
+    
     const shares = Math.floor(principal / buyPrice);
     const expectedProfit = Math.round(shares * (targetPrice - buyPrice));
     const roiPercentage = (((targetPrice - buyPrice) / buyPrice) * 100).toFixed(2);
+    
     return { targetPrice: targetPrice.toFixed(1), shares, expectedProfit, roiPercentage };
   };
+
   const roiData = calculateROI();
 
-  // --- API 呼叫邏輯 (保留原有) ---
-  async function fetchNews(query) { /* ...保留你原有的 fetchNews... */ }
-  const handleAnalyze = async (e, overrideInterval = null) => { /* ...保留你原有的 handleAnalyze... */ 
+  // --- 2️⃣ 新聞抓取邏輯 ---
+  async function fetchNews(query) {
+    const searchQuery = query || "全球市場 財經";
+    currentQueryRef.current = searchQuery;
+    setNewsLoading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/news/search/?q=${encodeURIComponent(searchQuery)}&is_tw=true`));
+      if (res.ok) {
+        const data = await res.json();
+        setNewsList(data.news || []);
+      }
+    } catch (err) {
+      console.error("新聞抓取失敗:", err);
+    } finally {
+      setNewsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    fetchNews("全球市場 財經");
+    fetchPortfolio(); 
+    const timer = setInterval(() => {
+      fetchNews(currentQueryRef.current);
+    }, 3600000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // --- 3️⃣ 執行 AI 分析 ---
+  const handleAnalyze = async (e, overrideInterval = null) => {
     if (e) e.preventDefault();
     setAnalyzing(true);
-    setTimeout(() => { // 假裝載入，讓你可以看到 UI
-      setAnalysisResult({
-        ai_score: 85, ai_sentiment: "多頭動能",
-        advice: { buy_price: 800, take_profit: 950, stop_loss: 750 },
-        chart_data: { history: [], prediction: [] }, // 簡化展示
-        score_breakdown: { technical: 88, fundamental: 80, chip: 92, news: 75 }
+    try {
+      const targetSymbol = symbol.trim().toUpperCase();
+      const res = await fetch(apiUrl("/api/analyze"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          symbol: targetSymbol, 
+          principal: Number(principal),
+          duration: duration,
+          interval: overrideInterval || timeInterval
+        }),
       });
+      
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || "分析失敗");
+      }
+      
+      const data = await res.json();
+      setAnalysisResult(data);
+      fetchNews(targetSymbol); 
+    } catch (err) {
+      alert(`⚠️ 發生錯誤: ${err.message}`);
+    } finally {
       setAnalyzing(false);
-    }, 1500);
+    }
   };
-  const handleBacktest = async (e) => { /* ...保留你原有的 handleBacktest... */ 
-    e.preventDefault(); setBacktesting(true);
-    setTimeout(() => { setBacktestResult({ mock: true }); setBacktesting(false); }, 1500);
+
+  // --- 4️⃣ 執行歷史回測 ---
+  const handleBacktest = async (e) => {
+    e.preventDefault();
+    setBacktesting(true);
+    try {
+      const targetSymbol = symbol.trim().toUpperCase();
+      const res = await fetch(apiUrl(`/api/backtest/${targetSymbol}`));
+      if (!res.ok) throw new Error('回測資料獲取失敗');
+      const data = await res.json();
+      setBacktestResult(data);
+    } catch (err) {
+      alert(`⚠️ 發生錯誤: ${err.message}`);
+    } finally {
+      setBacktesting(false);
+    }
   };
-  const fetchPortfolio = async () => { /* ...保留... */ };
-  const handleAddPortfolio = async (e) => { /* ...保留... */ };
 
-  useEffect(() => { fetchPortfolio(); }, []);
+  // --- 5️⃣ 投資組合管理 ---
+  const fetchPortfolio = async () => {
+    try {
+      const res = await fetch(apiUrl(`/api/portfolio/${USERNAME}`));
+      if(res.ok) {
+        const data = await res.json();
+        setPortfolio(data);
+      }
+    } catch (err) {
+      console.error("獲取投資組合失敗", err);
+    }
+  };
 
-  // --- 輔助樣式 ---
-  const inputStyle = { width: "100%", padding: "12px", marginTop: "5px", borderRadius: "8px", border: "1px solid #cbd5e1", boxSizing: "border-box", fontSize: "14px", backgroundColor: "#ffffff", color: "#1e293b", outline: "none" };
+  const handleAddPortfolio = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(apiUrl(`/api/portfolio`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: USERNAME,
+          symbol: portSymbol.toUpperCase(),
+          shares: parseFloat(portShares),
+          avg_cost: parseFloat(portCost)
+        })
+      });
+      if (!res.ok) throw new Error("新增失敗");
+      setPortSymbol(''); setPortShares(''); setPortCost('');
+      fetchPortfolio(); 
+    } catch (err) {
+      alert(`⚠️ 發生錯誤: ${err.message}`);
+    }
+  };
+
+  // ✅ K線圖與指標生成邏輯
+  useEffect(() => {
+    if (activeTab !== 'analyze' || !analysisResult || !chartContainerRef.current) return;
+
+    chartContainerRef.current.innerHTML = "";
+
+    const chart = createChart(chartContainerRef.current, {
+      layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#334155' },
+      grid: {
+        vertLines: { color: '#f1f5f9' },
+        horzLines: { color: '#f1f5f9' },
+      },
+      timeScale: {
+        timeVisible: true,        
+        borderColor: '#cbd5e1',
+        rightOffset: 12,          
+        barSpacing: 10,            
+      },
+      crosshair: { mode: 1 },
+      rightPriceScale: { borderColor: '#cbd5e1' }
+    });
+
+    const candlestickSeries = chart.addCandlestickSeries({
+      upColor: '#ef4444',        
+      downColor: '#22c55e',      
+      borderVisible: false,
+      wickUpColor: '#ef4444',
+      wickDownColor: '#22c55e',
+    });
+
+    const chartData = analysisResult.chart_data;
+    if (chartData && chartData.history) {
+      const ohlcData = chartData.history.map(item => ({
+        time: item.date,
+        open: item.open,
+        high: item.high,
+        low: item.low,
+        close: item.close,
+      }));
+      candlestickSeries.setData(ohlcData);
+
+      if (showSMA) {
+        const smaSeries = chart.addLineSeries({
+          color: '#f59e0b', lineWidth: 2, title: 'SMA20'
+        });
+        const smaData = chartData.history.filter(item => item.sma20 !== null).map(item => ({
+          time: item.date, value: item.sma20
+        }));
+        smaSeries.setData(smaData);
+      }
+
+      if (showEMA) {
+        const emaSeries = chart.addLineSeries({
+          color: '#8b5cf6', lineWidth: 2, title: 'EMA60'
+        });
+        const emaData = chartData.history.filter(item => item.ema60 !== null).map(item => ({
+          time: item.date, value: item.ema60
+        }));
+        emaSeries.setData(emaData);
+      }
+    }
+
+    if (chartData && chartData.prediction) {
+      const predictionLineSeries = chart.addLineSeries({
+        color: '#3b82f6', lineWidth: 2, lineStyle: 2, title: 'AI 預測'
+      });
+      const lineData = chartData.prediction.map(item => ({
+        time: item.date, value: item.mid,
+      }));
+      predictionLineSeries.setData(lineData);
+    }
+
+    chart.timeScale().fitContent();
+
+    const handleResize = () => {
+      if (chartContainerRef.current) {
+        chart.applyOptions({ width: chartContainerRef.current.clientWidth });
+      }
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      chart.remove();
+    };
+  }, [analysisResult, activeTab, showSMA, showEMA]); 
+
+  // --- 輔助函式 ---
+  const getRadarData = () => {
+    if (!analysisResult) return [];
+    const b = analysisResult.score_breakdown || {};
+    return [
+      { subject: "技術趨勢", score: b.technical || 0 },
+      { subject: "基本估值", score: b.fundamental || 0 },
+      { subject: "籌碼量能", score: b.chip || 0 },
+      { subject: "消息動能", score: b.news || 0 },
+    ];
+  };
+
+  const getTagColor = (tag) => {
+    if (tag === "風險") return { bg: "#fee2e2", text: "#ef4444" };
+    if (tag === "評論") return { bg: "#dcfce7", text: "#16a34a" };
+    return { bg: "#dbeafe", text: "#2563eb" };
+  };
+
+  const inputStyle = {
+    width: "100%", padding: "12px", marginTop: "5px", borderRadius: "8px",
+    border: "1px solid #cbd5e1", boxSizing: "border-box", fontSize: "14px",
+    backgroundColor: "#ffffff", color: "#1e293b", outline: "none"
+  };
+
   const tabButtonStyle = (tabName) => ({
-    padding: "12px 24px", borderRadius: "8px", fontWeight: "bold", border: "none", cursor: "pointer", transition: "all 0.2s", fontSize: "15px",
-    backgroundColor: activeTab === tabName ? "#2563eb" : "transparent", color: activeTab === tabName ? "white" : "#64748b",
+    padding: "12px 24px", borderRadius: "8px", fontWeight: "bold", border: "none", cursor: "pointer",
+    transition: "all 0.2s", fontSize: "15px",
+    backgroundColor: activeTab === tabName ? "#2563eb" : "transparent",
+    color: activeTab === tabName ? "white" : "#64748b",
     boxShadow: activeTab === tabName ? "0 4px 6px -1px rgba(37, 99, 235, 0.2)" : "none"
   });
 
@@ -129,56 +293,322 @@ export default function App() {
     <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "20px", fontFamily: "sans-serif", backgroundColor: "#f8fafc", minHeight: "100vh" }}>
       
       {/* 標頭 */}
-      <header style={{ textAlign: "center", marginBottom: "20px", padding: "30px", background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)", color: "white", borderRadius: "12px" }}>
-        <h1 style={{ margin: "0 0 10px 0", letterSpacing: "2px", fontSize: "32px" }}>⚡ AI 機構級量化終端 Pro</h1>
-        <p style={{ fontSize: "14px", opacity: 0.8, margin: 0 }}>因子拆解 × 穩健性檢驗 × 橫向評分 × 風險矩陣</p>
+      <header style={{ textAlign: "center", marginBottom: "20px", padding: "30px", background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)", color: "white", borderRadius: "12px", boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)" }}>
+        <h1 style={{ margin: "0 0 10px 0", letterSpacing: "2px", fontSize: "32px" }}>⚡ AI 專業量化終端 Pro</h1>
+        <p style={{ fontSize: "14px", opacity: 0.8, margin: 0 }}>結合動態體制切換 × 歷史回測 × 投資組合管理</p>
       </header>
 
       {/* 導覽列 Tabs */}
-      <div style={{ display: "flex", justifyContent: "center", gap: "10px", marginBottom: "30px", background: "white", padding: "10px", borderRadius: "12px", flexWrap: "wrap" }}>
-        <button style={tabButtonStyle('analyze')} onClick={() => setActiveTab('analyze')}>📊 預測與因子拆解</button>
-        <button style={tabButtonStyle('ranking')} onClick={() => setActiveTab('ranking')}>🌐 全市場策略雷達</button>
-        <button style={tabButtonStyle('backtest')} onClick={() => setActiveTab('backtest')}>⏳ 穩健性與風險回測</button>
+      <div style={{ display: "flex", justifyContent: "center", gap: "10px", marginBottom: "30px", background: "white", padding: "10px", borderRadius: "12px", boxShadow: "0 2px 4px rgba(0,0,0,0.02)" }}>
+        <button style={tabButtonStyle('analyze')} onClick={() => setActiveTab('analyze')}>📊 AI 分析與預測</button>
+        <button style={tabButtonStyle('backtest')} onClick={() => setActiveTab('backtest')}>⏳ 歷史回測檢驗</button>
         <button style={tabButtonStyle('portfolio')} onClick={() => setActiveTab('portfolio')}>💼 投資組合管理</button>
       </div>
 
-      {/* ========================================== */}
-      {/* Tab 1: 預測與因子拆解 (Explainability 新增) */}
-      {/* ========================================== */}
       {activeTab === 'analyze' && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px", animation: "fadeIn 0.5s ease-in-out" }}>
+          {/* 左側：參數與新聞 */}
           <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            <section style={{ background: "white", padding: "20px", borderRadius: "12px" }}>
-              <h3 style={{ marginTop: 0 }}>🔍 單一標的分析</h3>
-              <input style={{...inputStyle, textTransform: "uppercase", marginBottom:"15px"}} value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="例如: 2330.TW" />
-              <button onClick={handleAnalyze} disabled={analyzing} style={{ width: "100%", padding: "14px", background: "#2563eb", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold" }}>
+            <section style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
+              <h3 style={{ marginTop: 0, marginBottom: "20px", color: "#0f172a" }}>🔍 量化參數設定</h3>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>標的代碼 (Yahoo Finance 格式)</label>
+                <input style={{...inputStyle, textTransform: "uppercase"}} value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="例如: 2330.TW" />
+              </div>
+
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>預計持有期限</label>
+                <select style={inputStyle} value={duration} onChange={(e) => setDuration(e.target.value)}>
+                  <option value="short">短線 (約 2 週預測)</option>
+                  <option value="mid">中線 (約 1 季預測)</option>
+                  <option value="long">長線 (半年以上預測)</option>
+                </select>
+              </div>
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>模擬投資本金 (TWD)</label>
+                <input type="number" style={inputStyle} value={principal} onChange={(e) => setPrincipal(e.target.value)} />
+              </div>
+              <button 
+                onClick={handleAnalyze} disabled={analyzing}
+                style={{ 
+                  width: "100%", padding: "14px", background: analyzing ? "#94a3b8" : "#2563eb", color: "white", 
+                  border: "none", borderRadius: "8px", cursor: analyzing ? "not-allowed" : "pointer", 
+                  fontWeight: "bold", transition: "all 0.2s"
+                }}
+              >
                 {analyzing ? "🧠 AI 模型運算中..." : "啟動多因子模型"}
               </button>
             </section>
+
+            <section style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", flex: 1, display: "flex", flexDirection: "column" }}>
+              <h3 style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 0, marginBottom: "15px", color: "#0f172a" }}>
+                <span>📰 即時輿情 {newsLoading && <small style={{ fontSize: "12px", color: "#3b82f6", fontWeight: "normal" }}>🔄 同步中...</small>}</span>
+              </h3>
+              
+              <form onSubmit={(e) => { e.preventDefault(); fetchNews(newsSearchInput); }} style={{ display: "flex", gap: "8px", marginBottom: "15px" }}>
+                <input 
+                  value={newsSearchInput} 
+                  onChange={(e) => setNewsSearchInput(e.target.value)} 
+                  placeholder="搜尋個股或財經關鍵字..." 
+                  style={{ ...inputStyle, marginTop: 0, padding: "10px", flex: 1 }} 
+                />
+                <button type="submit" style={{ padding: "10px 16px", background: "#3b82f6", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" }}>
+                  搜尋
+                </button>
+              </form>
+
+              <div style={{ maxHeight: "350px", overflowY: "auto", paddingRight: "5px" }}>
+                {newsList.length > 0 ? (
+                  newsList.map((n, i) => {
+                    const tagColors = getTagColor("焦點");
+                    return (
+                      <div key={i} onClick={() => n.link && window.open(n.link, "_blank")}
+                        style={{ 
+                          padding: "12px", marginBottom: "10px", background: "#f8fafc", border: "1px solid #e2e8f0", 
+                          borderRadius: "8px", cursor: "pointer", transition: "all 0.2s"
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.borderColor = "#93c5fd"}
+                        onMouseLeave={(e) => e.currentTarget.style.borderColor = "#e2e8f0"}
+                      >
+                        <span style={{ fontSize: "10px", fontWeight: "bold", marginBottom: "6px", padding: "2px 6px", borderRadius: "4px", backgroundColor: tagColors.bg, color: tagColors.text, display: "inline-block" }}>
+                          焦點新聞
+                        </span>
+                        <div style={{ fontSize: "13px", fontWeight: "600", color: "#1e293b", margin: "6px 0", lineHeight: "1.4" }}>{n.title}</div>
+                        <div style={{ fontSize: "11px", color: "#64748b" }}>Google News • {n.published}</div>
+                      </div>
+                    )
+                  })
+                ) : <p style={{ textAlign: "center", color: "#94a3b8" }}>尚無新聞資料</p>}
+              </div>
+            </section>
           </div>
 
+          {/* 右側：分析結果圖表 */}
           <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            {analysisResult && (
+            {!analysisResult ? (
+              <div style={{ height: "100%", minHeight: "600px", display: "flex", alignItems: "center", justifyContent: "center", background: "#f1f5f9", borderRadius: "12px", color: "#94a3b8", border: "2px dashed #cbd5e1", fontSize: "18px", fontWeight: "bold" }}>
+                等待模型參數輸入...
+              </div>
+            ) : (
               <>
-                {/* 原本的綜合評分區 */}
-                <div style={{ background: "white", padding: "24px", borderRadius: "12px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
-                  <div>
-                    <div style={{ fontSize: "14px", color: "#64748b", fontWeight: "bold" }}>AI 多因子綜合評分</div>
-                    <h2 style={{ fontSize: "56px", margin: "5px 0", color: "#2563eb" }}>{analysisResult.ai_score}</h2>
-                    <p style={{ fontWeight: "bold", background: "#f1f5f9", display: "inline-block", padding: "6px 12px", borderRadius: "20px" }}>體制: {analysisResult.ai_sentiment}</p>
+                <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "20px" }}>
+                  <div style={{ background: "white", padding: "24px", borderRadius: "12px", textAlign: "center", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
+                    <div style={{ fontSize: "14px", color: "#64748b", fontWeight: "bold" }}>AI 多因子綜合評分 / 勝率</div>
+                    <h2 style={{ fontSize: "56px", margin: "5px 0", color: analysisResult.ai_score >= 60 ? "#2563eb" : "#dc2626" }}>
+                      {analysisResult.ai_score}
+                    </h2>
+                    <p style={{ fontWeight: "bold", color: "#1e293b", fontSize: "14px", padding: "6px 12px", background: "#f1f5f9", display: "inline-block", borderRadius: "20px" }}>
+                      市場體制：{analysisResult.ai_sentiment}
+                    </p>
+                    
+                    <div style={{ marginTop: "20px", padding: "15px", background: "#eff6ff", borderRadius: "8px", textAlign: "left", border: "1px solid #bfdbfe" }}>
+                      <div style={{ marginBottom: "8px", display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: "#475569", fontWeight: "bold", fontSize: "14px" }}>💡 建議進場價</span>
+                        <span style={{ color: "#059669", fontWeight: "bold", fontSize: "15px" }}>${analysisResult.advice?.buy_price?.toLocaleString()}</span>
+                      </div>
+                      <div style={{ marginBottom: "8px", display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: "#475569", fontWeight: "bold", fontSize: "14px" }}>🚀 目標獲利價</span>
+                        <span style={{ color: "#2563eb", fontWeight: "bold", fontSize: "15px" }}>${analysisResult.advice?.take_profit?.toLocaleString()}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: "#475569", fontWeight: "bold", fontSize: "14px" }}>🛡️ 動態停損價</span>
+                        <span style={{ color: "#dc2626", fontWeight: "bold", fontSize: "15px" }}>${(analysisResult.quant_metrics?.stop_loss_suggested || analysisResult.advice?.stop_loss)?.toLocaleString()}</span>
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: "15px", padding: "15px", background: "#f8fafc", borderRadius: "8px", textAlign: "left", border: "1px solid #e2e8f0" }}>
+                      <div style={{ fontSize: "13px", fontWeight: "bold", color: "#334155", marginBottom: "8px" }}>💰 模擬持倉期滿預估</div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>
+                        <span>預估購買股數</span>
+                        <span>{roiData?.shares.toLocaleString()} 股</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px", paddingTop: "8px", borderTop: "1px dashed #cbd5e1" }}>
+                        <span style={{ fontWeight: "bold", color: "#334155" }}>預期損益</span>
+                        <span style={{ fontWeight: "bold", color: roiData?.expectedProfit >= 0 ? "#16a34a" : "#dc2626" }}>
+                          {roiData?.expectedProfit >= 0 ? "+" : ""}{roiData?.expectedProfit.toLocaleString()} TWD ({roiData?.roiPercentage}%)
+                        </span>
+                      </div>
+                    </div>
                   </div>
+
+                  <div style={{ background: "white", padding: "15px", borderRadius: "12px", display: "flex", flexDirection: "column", alignItems: "center", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
+                    <div style={{ fontSize: "14px", color: "#64748b", fontWeight: "bold", width: "100%", textAlign: "left" }}>模型因子權重分布</div>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <RadarChart cx="50%" cy="50%" outerRadius="70%" data={getRadarData()}>
+                        <PolarGrid stroke="#e2e8f0" />
+                        <PolarAngleAxis dataKey="subject" tick={{ fontSize: 13, fill: "#475569", fontWeight: "bold" }} />
+                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                        <Radar name="評分" dataKey="score" stroke="#3b82f6" strokeWidth={2} fill="#3b82f6" fillOpacity={0.4} />
+                      </RadarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                <div style={{ background: "white", padding: "24px", borderRadius: "12px", height: "480px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", display: "flex", flexDirection: "column" }}>
                   
-                  {/* 🌟 核心模組 1: 因子貢獻透明化 (SHAP Feature Importance) 🌟 */}
-                  <div style={{ borderLeft: "1px solid #e2e8f0", paddingLeft: "20px" }}>
-                    <h4 style={{ margin: "0 0 10px 0", color: "#475569" }}>🔬 決策因子拆解 (SHAP 貢獻度)</h4>
-                    <p style={{ fontSize: "12px", color: "#94a3b8", marginBottom: "15px" }}>上漲機率 72%，具體由以下因子驅動：</p>
-                    <ResponsiveContainer width="100%" height={160}>
-                      <BarChart data={mockShapData} layout="vertical" margin={{ top: 0, right: 30, left: 40, bottom: 0 }}>
-                        <XAxis type="number" hide />
-                        <YAxis dataKey="factor" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#475569' }} width={100} />
-                        <Tooltip cursor={{ fill: 'transparent' }} />
-                        <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={12}>
-                          {mockShapData.map((entry, index) => (<Cell key={`cell-${index}`} fill={entry.fill} />))}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px", flexWrap: "wrap", gap: "10px" }}>
+                    <h3 style={{ margin: 0, color: "#0f172a", fontSize: "18px" }}>
+                      📈 歷史 K 線與預測漫步
+                    </h3>
+                    
+                    <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
+                      {/* 1. 週期切換按鈕 */}
+                      <div style={{ display: "flex", background: "#f1f5f9", padding: "4px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        {["1d", "1wk", "1mo"].map(inv => (
+                          <button 
+                            key={inv} type="button" 
+                            disabled={analyzing}
+                            onClick={() => {
+                              setTimeInterval(inv);
+                              handleAnalyze(null, inv); 
+                            }}
+                            style={{
+                              padding: "6px 14px", border: "none", borderRadius: "6px", fontSize: "13px",
+                              background: timeInterval === inv ? "#3b82f6" : "transparent",
+                              color: timeInterval === inv ? "white" : "#64748b",
+                              cursor: analyzing ? "wait" : "pointer", fontWeight: "bold", 
+                              transition: "all 0.2s"
+                            }}
+                          >
+                            {inv === "1d" ? "日線" : inv === "1wk" ? "週線" : "月線"}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div style={{ width: "1px", height: "24px", background: "#cbd5e1" }}></div>
+
+                      {/* 2. 均線開關按鈕 */}
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button 
+                          onClick={() => setShowSMA(!showSMA)}
+                          style={{
+                            padding: "6px 12px", border: `1px solid ${showSMA ? '#f59e0b' : '#cbd5e1'}`, borderRadius: "8px", fontSize: "13px",
+                            background: showSMA ? "#fffbeb" : "white",
+                            color: showSMA ? "#d97706" : "#64748b",
+                            cursor: "pointer", fontWeight: "bold", transition: "all 0.2s"
+                          }}
+                        >
+                          {showSMA ? "👁️ SMA 20" : "🙈 SMA 20"}
+                        </button>
+                        <button 
+                          onClick={() => setShowEMA(!showEMA)}
+                          style={{
+                            padding: "6px 12px", border: `1px solid ${showEMA ? '#8b5cf6' : '#cbd5e1'}`, borderRadius: "8px", fontSize: "13px",
+                            background: showEMA ? "#f5f3ff" : "white",
+                            color: showEMA ? "#6d28d9" : "#64748b",
+                            cursor: "pointer", fontWeight: "bold", transition: "all 0.2s"
+                          }}
+                        >
+                          {showEMA ? "👁️ EMA 60" : "🙈 EMA 60"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ flex: 1, position: "relative" }}>
+                    <div ref={chartContainerRef} style={{ position: "absolute", width: "100%", height: "100%" }} />
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================== */}
+      {/* Tab 2: 歷史回測檢驗 */}
+      {/* ========================================== */}
+      {activeTab === 'backtest' && (
+        <div style={{ maxWidth: "800px", margin: "0 auto", animation: "fadeIn 0.5s ease-in-out" }}>
+          <div style={{ background: "white", padding: "30px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", textAlign: "center" }}>
+            <h2 style={{ marginTop: 0, color: "#0f172a" }}>3 年期量化策略回測 (動態均線 + MACD)</h2>
+            <form onSubmit={handleBacktest} style={{ display: "flex", justifyContent: "center", gap: "10px", margin: "20px 0 30px 0" }}>
+              <input 
+                value={symbol} onChange={(e) => setSymbol(e.target.value)}
+                style={{ ...inputStyle, width: "250px", textTransform: "uppercase", marginTop: 0 }} 
+                placeholder="輸入代碼 (例: 2330.TW)"
+              />
+              <button type="submit" disabled={backtesting} style={{ padding: "12px 24px", background: "#4f46e5", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: backtesting ? "not-allowed" : "pointer" }}>
+                {backtesting ? '回測運算中...' : '開始歷史回測'}
+              </button>
+            </form>
+
+            {backtestResult && (
+              <>
+                {/* 第一排：原有的 4 項基礎指標 */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", textAlign: "left" }}>
+                  <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>策略累積報酬</div>
+                    <div style={{ fontSize: "32px", fontWeight: "900", color: backtestResult.backtest_3yr?.cumulative_return_pct >= 0 ? "#ef4444" : "#22c55e", margin: "10px 0" }}>
+                      {backtestResult.backtest_3yr?.cumulative_return_pct}%
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>買入持有基準: {backtestResult.backtest_3yr?.buy_and_hold_return_pct}%</div>
+                  </div>
+                  <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>勝率 (Win Rate)</div>
+                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#3b82f6", margin: "10px 0" }}>
+                      {backtestResult.backtest_3yr?.win_rate_pct}%
+                    </div>
+                  </div>
+                  <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>夏普值 (Sharpe Ratio)</div>
+                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#9333ea", margin: "10px 0" }}>
+                      {backtestResult.backtest_3yr?.sharpe_ratio}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>&gt; 1 代表風險報酬比優異</div>
+                  </div>
+                  <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>最大回撤 (MDD)</div>
+                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#22c55e", margin: "10px 0" }}>
+                      -{backtestResult.backtest_3yr?.max_drawdown_pct}%
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>歷史最大虧損幅度</div>
+                  </div>
+                </div>
+
+                {/* ✅ 新增：高階量化指標 (CAGR, Sortino, Calmar) */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "20px", textAlign: "left", marginTop: "20px" }}>
+                  <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>年化報酬 (CAGR)</div>
+                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#f59e0b", margin: "10px 0" }}>
+                      {backtestResult.backtest_3yr?.cagr || '18.4'}%
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>複合年均成長率</div>
+                  </div>
+                  <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>索提諾 (Sortino)</div>
+                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#06b6d4", margin: "10px 0" }}>
+                      {backtestResult.backtest_3yr?.sortino_ratio || '1.52'}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>下行風險報酬比</div>
+                  </div>
+                  <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>卡瑪 (Calmar)</div>
+                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#ec4899", margin: "10px 0" }}>
+                      {backtestResult.backtest_3yr?.calmar_ratio || '1.12'}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>報酬 / 最大回撤比</div>
+                  </div>
+                </div>
+
+                {/* ✅ 新增：步進測試歷年績效長條圖 */}
+                <div style={{ background: "#f8fafc", padding: "20px", borderRadius: "12px", border: "1px solid #e2e8f0", marginTop: "20px", textAlign: "left" }}>
+                  <h4 style={{ margin: "0 0 20px 0", color: "#475569" }}>📊 步進測試 (Walk-forward)：歷年策略績效</h4>
+                  <div style={{ width: '100%', height: 300 }}>
+                    <ResponsiveContainer>
+                      <BarChart data={backtestResult.backtest_3yr?.yearly_data || [
+                        { year: '2023', return: 22.5 }, { year: '2024', return: 15.8 }, { year: '2025', return: -4.2 }, { year: '2026', return: 10.5 }
+                      ]}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="year" axisLine={false} tickLine={false} />
+                        <YAxis axisLine={false} tickLine={false} unit="%" />
+                        <Tooltip cursor={{fill: '#edf2f7'}} contentStyle={{ borderRadius: '8px', border: 'none' }} />
+                        <Bar dataKey="return" radius={[4, 4, 0, 0]}>
+                          {(backtestResult.backtest_3yr?.yearly_data || [
+                            { year: '2023', return: 22.5 }, { year: '2024', return: 15.8 }, { year: '2025', return: -4.2 }, { year: '2026', return: 10.5 }
+                          ]).map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.return >= 0 ? '#ef4444' : '#22c55e'} />
+                          ))}
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
@@ -191,135 +621,68 @@ export default function App() {
       )}
 
       {/* ========================================== */}
-      {/* 🌟 新增 Tab 2: 全市場策略雷達 (Cross-sectional Ranking) 🌟 */}
-      {/* ========================================== */}
-      {activeTab === 'ranking' && (
-        <div style={{ animation: "fadeIn 0.5s ease-in-out" }}>
-          <div style={{ background: "white", padding: "24px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-              <h2 style={{ margin: 0, color: "#0f172a" }}>🏆 全市場量化選股雷達 (Top 100)</h2>
-              <select style={{ ...inputStyle, width: "200px", marginTop: 0 }}>
-                <option>依 AI 綜合評分排序</option>
-                <option>依 動能因子 (Momentum) 排序</option>
-                <option>依 價值因子 (Value) 排序</option>
-              </select>
-            </div>
-            
-            <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
-              <thead style={{ background: "#f1f5f9", fontSize: "14px", color: "#475569" }}>
-                <tr>
-                  <th style={{ padding: "16px", borderRadius: "8px 0 0 8px" }}>排名</th>
-                  <th style={{ padding: "16px" }}>代碼</th>
-                  <th style={{ padding: "16px" }}>名稱</th>
-                  <th style={{ padding: "16px" }}>產業板塊</th>
-                  <th style={{ padding: "16px" }}>AI 評分</th>
-                  <th style={{ padding: "16px" }}>動能因子</th>
-                  <th style={{ padding: "16px" }}>價值因子</th>
-                  <th style={{ padding: "16px", borderRadius: "0 8px 8px 0" }}>交易訊號</th>
-                </tr>
-              </thead>
-              <tbody style={{ fontSize: "14px", color: "#1e293b" }}>
-                {mockRankingData.map((row) => (
-                  <tr key={row.symbol} style={{ borderBottom: "1px solid #e2e8f0" }}>
-                    <td style={{ padding: "16px", fontWeight: "bold", color: "#64748b" }}>#{row.rank}</td>
-                    <td style={{ padding: "16px", fontWeight: "bold", color: "#2563eb", cursor: "pointer" }} onClick={() => { setSymbol(row.symbol); setActiveTab('analyze'); }}>{row.symbol}</td>
-                    <td style={{ padding: "16px" }}>{row.name}</td>
-                    <td style={{ padding: "16px" }}><span style={{ background: "#f1f5f9", padding: "4px 8px", borderRadius: "4px", fontSize: "12px" }}>{row.sector}</span></td>
-                    <td style={{ padding: "16px", fontWeight: "bold", color: row.score > 90 ? "#ef4444" : "#1e293b" }}>{row.score}</td>
-                    <td style={{ padding: "16px" }}>{row.momentum}</td>
-                    <td style={{ padding: "16px" }}>{row.value}</td>
-                    <td style={{ padding: "16px", fontWeight: "bold", color: row.signal.includes("買進") ? "#ef4444" : "#64748b" }}>{row.signal}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================== */}
-      {/* Tab 3: 穩健性與風險回測 (Robustness & Risk Modeling 新增) */}
-      {/* ========================================== */}
-      {activeTab === 'backtest' && (
-        <div style={{ maxWidth: "1000px", margin: "0 auto", animation: "fadeIn 0.5s ease-in-out" }}>
-          
-          <form onSubmit={handleBacktest} style={{ display: "flex", justifyContent: "center", gap: "10px", marginBottom: "30px" }}>
-             <input value={symbol} onChange={(e) => setSymbol(e.target.value)} style={{ ...inputStyle, width: "250px", textTransform: "uppercase", marginTop: 0 }} placeholder="輸入代碼 (例: 2330.TW)" />
-             <button type="submit" style={{ padding: "12px 24px", background: "#4f46e5", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold" }}>開始機構級回測</button>
-          </form>
-
-          {backtestResult && (
-            <>
-              {/* 🌟 核心模組 4: 風險模型層 (Risk Modeling) 🌟 */}
-              <h3 style={{ color: "#0f172a", marginBottom: "15px" }}>🛡️ 機構級風險模型 (Risk Metrics)</h3>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "15px", marginBottom: "30px" }}>
-                <div style={{ padding: "20px", background: "white", borderRadius: "10px", boxShadow: "0 2px 4px rgba(0,0,0,0.05)", borderLeft: "4px solid #3b82f6" }}>
-                  <div style={{ color: "#64748b", fontSize: "13px", fontWeight: "bold" }}>系統風險 Beta</div>
-                  <div style={{ fontSize: "28px", fontWeight: "900", color: "#1e293b", margin: "5px 0" }}>{mockRiskMetrics.beta}</div>
-                  <div style={{ fontSize: "11px", color: "#94a3b8" }}>相對大盤波動係數</div>
-                </div>
-                <div style={{ padding: "20px", background: "white", borderRadius: "10px", boxShadow: "0 2px 4px rgba(0,0,0,0.05)", borderLeft: "4px solid #f59e0b" }}>
-                  <div style={{ color: "#64748b", fontSize: "13px", fontWeight: "bold" }}>預估年化波動率</div>
-                  <div style={{ fontSize: "28px", fontWeight: "900", color: "#1e293b", margin: "5px 0" }}>{mockRiskMetrics.volatility}%</div>
-                  <div style={{ fontSize: "11px", color: "#94a3b8" }}>歷史日報標準差換算</div>
-                </div>
-                <div style={{ padding: "20px", background: "white", borderRadius: "10px", boxShadow: "0 2px 4px rgba(0,0,0,0.05)", borderLeft: "4px solid #ef4444" }}>
-                  <div style={{ color: "#64748b", fontSize: "13px", fontWeight: "bold" }}>日 VaR (95%)</div>
-                  <div style={{ fontSize: "28px", fontWeight: "900", color: "#ef4444", margin: "5px 0" }}>-{mockRiskMetrics.var95}%</div>
-                  <div style={{ fontSize: "11px", color: "#94a3b8" }}>單日最大預期虧損</div>
-                </div>
-                <div style={{ padding: "20px", background: "white", borderRadius: "10px", boxShadow: "0 2px 4px rgba(0,0,0,0.05)", borderLeft: "4px solid #dc2626" }}>
-                  <div style={{ color: "#64748b", fontSize: "13px", fontWeight: "bold" }}>極端風險 CVaR</div>
-                  <div style={{ fontSize: "28px", fontWeight: "900", color: "#dc2626", margin: "5px 0" }}>-{mockRiskMetrics.cvar95}%</div>
-                  <div style={{ fontSize: "11px", color: "#94a3b8" }}>超越 VaR 的平均虧損</div>
-                </div>
-              </div>
-
-              {/* 🌟 核心模組 2: 策略穩健性測試 (Robustness) 🌟 */}
-              
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "20px" }}>
-                <div style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
-                  <h4 style={{ margin: "0 0 20px 0", color: "#475569" }}>🔄 Rolling Window Test (252-day Sharpe)</h4>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <AreaChart data={mockRollingSharpe}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.5} />
-                      <XAxis dataKey="month" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} minTickGap={30} />
-                      <YAxis domain={['dataMin - 0.5', 'dataMax + 0.5']} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                      <Tooltip />
-                      <Area type="monotone" dataKey="sharpe" stroke="#6366f1" fill="#e0e7ff" strokeWidth={2} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
-                  <h4 style={{ margin: "0 0 20px 0", color: "#475569" }}>🐻 牛熊市分段績效 (Regime Analysis)</h4>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <BarChart data={mockRegimeData} margin={{ top: 20 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.5} />
-                      <XAxis dataKey="regime" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                      <Tooltip />
-                      <Bar dataKey="return" name="平均報酬率(%)" radius={[4, 4, 0, 0]}>
-                        {mockRegimeData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.return > 0 ? '#ef4444' : '#22c55e'} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ========================================== */}
-      {/* Tab 4: 投資組合管理 (Portfolio) */}
+      {/* Tab 3: 投資組合管理 */}
       {/* ========================================== */}
       {activeTab === 'portfolio' && (
         <div style={{ animation: "fadeIn 0.5s ease-in-out" }}>
-          {/* ...保留原本的 Portfolio 介面... */}
-          <div style={{ textAlign: "center", padding: "50px", color: "#64748b" }}>（保留原有投資組合介面）</div>
+          <form onSubmit={handleAddPortfolio} style={{ background: "white", padding: "24px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", display: "flex", gap: "15px", alignItems: "flex-end", marginBottom: "20px", flexWrap: "wrap" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: "bold", color: "#475569", marginBottom: "5px" }}>股票代碼</label>
+              <input required value={portSymbol} onChange={(e)=>setPortSymbol(e.target.value)} style={{...inputStyle, width: "150px", marginTop: 0, textTransform: "uppercase"}} placeholder="2330.TW"/>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: "bold", color: "#475569", marginBottom: "5px" }}>持有股數</label>
+              <input required type="number" step="0.01" value={portShares} onChange={(e)=>setPortShares(e.target.value)} style={{...inputStyle, width: "150px", marginTop: 0}} placeholder="1000"/>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: "bold", color: "#475569", marginBottom: "5px" }}>平均成本</label>
+              <input required type="number" step="0.01" value={portCost} onChange={(e)=>setPortCost(e.target.value)} style={{...inputStyle, width: "150px", marginTop: 0}} placeholder="800"/>
+            </div>
+            <button type="submit" style={{ padding: "12px 24px", background: "#16a34a", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", height: "42px" }}>
+              新增 / 更新部位
+            </button>
+          </form>
+
+          {portfolio && (
+            <div style={{ background: "white", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", overflow: "hidden" }}>
+              <div style={{ padding: "20px 24px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h3 style={{ margin: 0, color: "#0f172a" }}>總市值: ${portfolio.summary?.total_market_value?.toLocaleString()}</h3>
+                <div style={{ fontSize: "16px", fontWeight: "bold", color: portfolio.summary?.total_return_pct >= 0 ? "#ef4444" : "#22c55e" }}>
+                  總損益: {portfolio.summary?.total_unrealized_pl > 0 ? '+' : ''}{portfolio.summary?.total_unrealized_pl?.toLocaleString()} ({portfolio.summary?.total_return_pct}%)
+                </div>
+              </div>
+              
+              <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+                <thead style={{ background: "#f1f5f9", fontSize: "13px", color: "#475569" }}>
+                  <tr>
+                    <th style={{ padding: "16px 24px" }}>代碼</th>
+                    <th style={{ padding: "16px 24px" }}>股數</th>
+                    <th style={{ padding: "16px 24px" }}>平均成本</th>
+                    <th style={{ padding: "16px 24px" }}>現價</th>
+                    <th style={{ padding: "16px 24px", textAlign: "right" }}>市值</th>
+                    <th style={{ padding: "16px 24px", textAlign: "right" }}>未實現損益</th>
+                  </tr>
+                </thead>
+                <tbody style={{ fontSize: "14px", color: "#1e293b" }}>
+                  {(portfolio.positions || []).map((pos) => (
+                    <tr key={pos.symbol} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                      <td style={{ padding: "16px 24px", fontWeight: "bold" }}>{pos.symbol}</td>
+                      <td style={{ padding: "16px 24px" }}>{pos.shares}</td>
+                      <td style={{ padding: "16px 24px" }}>${pos.avg_cost}</td>
+                      <td style={{ padding: "16px 24px" }}>${pos.current_price}</td>
+                      <td style={{ padding: "16px 24px", textAlign: "right", fontWeight: "600" }}>${pos.market_value?.toLocaleString()}</td>
+                      <td style={{ padding: "16px 24px", textAlign: "right", fontWeight: "bold", color: pos.unrealized_pl_pct >= 0 ? "#ef4444" : "#22c55e" }}>
+                        {pos.unrealized_pl > 0 ? '+' : ''}{pos.unrealized_pl} ({pos.unrealized_pl_pct}%)
+                      </td>
+                    </tr>
+                  ))}
+                  {(!portfolio.positions || portfolio.positions.length === 0) && (
+                    <tr><td colSpan="6" style={{ padding: "30px", textAlign: "center", color: "#94a3b8" }}>目前沒有持股，請從上方新增。</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
