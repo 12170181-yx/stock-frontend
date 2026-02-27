@@ -19,8 +19,12 @@ export default function App() {
   const [symbol, setSymbol] = useState("2330.TW");
   const [principal, setPrincipal] = useState(100000);
   const [duration, setDuration] = useState("mid");
-  const [timeInterval, setTimeInterval] = useState("1d"); // ✅ 新增：K線週期狀態
+  const [timeInterval, setTimeInterval] = useState("1d"); 
   
+  // ✅ 新增：均線顯示狀態（預設 false，沒按不出現）
+  const [showSMA, setShowSMA] = useState(false);
+  const [showEMA, setShowEMA] = useState(false);
+
   const [analysisResult, setAnalysisResult] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   
@@ -82,11 +86,11 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // --- 3️⃣ 執行 AI 分析 ---
-  const handleAnalyze = async (e) => {
+  // --- 3️⃣ 執行 AI 分析 (✅ 修改：支援傳入指定的 interval，讓圖表上方點擊能自動抓取) ---
+  const handleAnalyze = async (e, overrideInterval = null) => {
     if (e) e.preventDefault();
     setAnalyzing(true);
-    setAnalysisResult(null);
+    // 注意：這裡不把 analysisResult 清空，可以讓圖表在抓新資料時不會突然白屏閃爍
     try {
       const targetSymbol = symbol.trim().toUpperCase();
       const res = await fetch(apiUrl("/api/analyze"), {
@@ -96,7 +100,7 @@ export default function App() {
           symbol: targetSymbol, 
           principal: Number(principal),
           duration: duration,
-          interval: timeInterval // ✅ 新增：將週期參數傳給後端
+          interval: overrideInterval || timeInterval
         }),
       });
       
@@ -188,7 +192,6 @@ export default function App() {
       rightPriceScale: { borderColor: '#cbd5e1' }
     });
 
-    // 設定 K 線
     const candlestickSeries = chart.addCandlestickSeries({
       upColor: '#ef4444',        
       downColor: '#22c55e',      
@@ -197,31 +200,8 @@ export default function App() {
       wickDownColor: '#22c55e',
     });
 
-    // ✅ 新增：SMA 20 指標線
-    const smaSeries = chart.addLineSeries({
-      color: '#f59e0b',          // 橘色代表 SMA20
-      lineWidth: 2,
-      title: 'SMA20'
-    });
-
-    // ✅ 新增：EMA 60 指標線
-    const emaSeries = chart.addLineSeries({
-      color: '#8b5cf6',          // 紫色代表 EMA60
-      lineWidth: 2,
-      title: 'EMA60'
-    });
-
-    // 設定預測 AI 折線
-    const predictionLineSeries = chart.addLineSeries({
-      color: '#3b82f6',          
-      lineWidth: 2,
-      lineStyle: 2,              
-      title: 'AI 預測漫步'
-    });
-
     const chartData = analysisResult.chart_data;
     if (chartData && chartData.history) {
-      // ✅ 配合後端傳回的真實 OHLC 與指標資料
       const ohlcData = chartData.history.map(item => ({
         time: item.date,
         open: item.open,
@@ -231,24 +211,35 @@ export default function App() {
       }));
       candlestickSeries.setData(ohlcData);
 
-      // ✅ 綁定 SMA 與 EMA 資料
-      const smaData = chartData.history.filter(item => item.sma20 !== null).map(item => ({
-        time: item.date,
-        value: item.sma20
-      }));
-      const emaData = chartData.history.filter(item => item.ema60 !== null).map(item => ({
-        time: item.date,
-        value: item.ema60
-      }));
-      
-      smaSeries.setData(smaData);
-      emaSeries.setData(emaData);
+      // ✅ 根據開關狀態決定是否畫 SMA
+      if (showSMA) {
+        const smaSeries = chart.addLineSeries({
+          color: '#f59e0b', lineWidth: 2, title: 'SMA20'
+        });
+        const smaData = chartData.history.filter(item => item.sma20 !== null).map(item => ({
+          time: item.date, value: item.sma20
+        }));
+        smaSeries.setData(smaData);
+      }
+
+      // ✅ 根據開關狀態決定是否畫 EMA
+      if (showEMA) {
+        const emaSeries = chart.addLineSeries({
+          color: '#8b5cf6', lineWidth: 2, title: 'EMA60'
+        });
+        const emaData = chartData.history.filter(item => item.ema60 !== null).map(item => ({
+          time: item.date, value: item.ema60
+        }));
+        emaSeries.setData(emaData);
+      }
     }
 
     if (chartData && chartData.prediction) {
+      const predictionLineSeries = chart.addLineSeries({
+        color: '#3b82f6', lineWidth: 2, lineStyle: 2, title: 'AI 預測'
+      });
       const lineData = chartData.prediction.map(item => ({
-        time: item.date,
-        value: item.mid,
+        time: item.date, value: item.mid,
       }));
       predictionLineSeries.setData(lineData);
     }
@@ -266,7 +257,7 @@ export default function App() {
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [analysisResult, activeTab]);
+  }, [analysisResult, activeTab, showSMA, showEMA]); // ✅ 加入 showSMA/showEMA 綁定依賴
 
   // --- 輔助函式 ---
   const getRadarData = () => {
@@ -326,27 +317,8 @@ export default function App() {
                 <label style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>標的代碼 (Yahoo Finance 格式)</label>
                 <input style={{...inputStyle, textTransform: "uppercase"}} value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="例如: 2330.TW" />
               </div>
-              
-              {/* ✅ 新增：K 線週期選單 */}
-              <div style={{ marginBottom: "15px" }}>
-                <label style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>K 線分析週期</label>
-                <div style={{ display: "flex", gap: "5px", marginTop: "5px" }}>
-                  {["1d", "1wk", "1mo"].map(inv => (
-                    <button 
-                      key={inv} type="button" 
-                      onClick={() => setTimeInterval(inv)}
-                      style={{
-                        flex: 1, padding: "8px", border: "1px solid #cbd5e1", borderRadius: "6px",
-                        background: timeInterval === inv ? "#3b82f6" : "white",
-                        color: timeInterval === inv ? "white" : "#475569",
-                        cursor: "pointer", fontWeight: "bold", transition: "all 0.2s"
-                      }}
-                    >
-                      {inv === "1d" ? "日線" : inv === "1wk" ? "週線" : "月線"}
-                    </button>
-                  ))}
-                </div>
-              </div>
+
+              {/* ✅ 這裡的「K線分析週期」已經被移除，改到圖表上方了 */}
 
               <div style={{ marginBottom: "15px" }}>
                 <label style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>預計持有期限</label>
@@ -476,11 +448,68 @@ export default function App() {
                   </div>
                 </div>
 
-                <div style={{ background: "white", padding: "24px", borderRadius: "12px", height: "450px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", display: "flex", flexDirection: "column" }}>
-                  <h3 style={{ margin: "0 0 10px 0", color: "#0f172a", display: "flex", justifyContent: "space-between" }}>
-                    <span>📈 歷史 K 線、趨勢線 (SMA20/EMA60) 與預測</span>
-                    <span style={{fontSize:"13px", color:"#64748b", fontWeight:"normal"}}>✅ 支援滑鼠滾輪縮放與拖曳平移</span>
-                  </h3>
+                <div style={{ background: "white", padding: "24px", borderRadius: "12px", height: "480px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", display: "flex", flexDirection: "column" }}>
+                  
+                  {/* ✅ 修改：把控制列加到圖表正上方 */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px", flexWrap: "wrap", gap: "10px" }}>
+                    <h3 style={{ margin: 0, color: "#0f172a", fontSize: "18px" }}>
+                      📈 歷史 K 線與預測漫步
+                    </h3>
+                    
+                    <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
+                      {/* 1. 週期切換按鈕 */}
+                      <div style={{ display: "flex", background: "#f1f5f9", padding: "4px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        {["1d", "1wk", "1mo"].map(inv => (
+                          <button 
+                            key={inv} type="button" 
+                            disabled={analyzing}
+                            onClick={() => {
+                              setTimeInterval(inv);
+                              handleAnalyze(null, inv); // ✅ 點擊後直接用新週期重抓資料
+                            }}
+                            style={{
+                              padding: "6px 14px", border: "none", borderRadius: "6px", fontSize: "13px",
+                              background: timeInterval === inv ? "#3b82f6" : "transparent",
+                              color: timeInterval === inv ? "white" : "#64748b",
+                              cursor: analyzing ? "wait" : "pointer", fontWeight: "bold", 
+                              transition: "all 0.2s"
+                            }}
+                          >
+                            {inv === "1d" ? "日線" : inv === "1wk" ? "週線" : "月線"}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div style={{ width: "1px", height: "24px", background: "#cbd5e1" }}></div>
+
+                      {/* 2. 均線開關按鈕 */}
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button 
+                          onClick={() => setShowSMA(!showSMA)}
+                          style={{
+                            padding: "6px 12px", border: `1px solid ${showSMA ? '#f59e0b' : '#cbd5e1'}`, borderRadius: "8px", fontSize: "13px",
+                            background: showSMA ? "#fffbeb" : "white",
+                            color: showSMA ? "#d97706" : "#64748b",
+                            cursor: "pointer", fontWeight: "bold", transition: "all 0.2s"
+                          }}
+                        >
+                          {showSMA ? "👁️ SMA 20" : "🙈 SMA 20"}
+                        </button>
+                        <button 
+                          onClick={() => setShowEMA(!showEMA)}
+                          style={{
+                            padding: "6px 12px", border: `1px solid ${showEMA ? '#8b5cf6' : '#cbd5e1'}`, borderRadius: "8px", fontSize: "13px",
+                            background: showEMA ? "#f5f3ff" : "white",
+                            color: showEMA ? "#6d28d9" : "#64748b",
+                            cursor: "pointer", fontWeight: "bold", transition: "all 0.2s"
+                          }}
+                        >
+                          {showEMA ? "👁️ EMA 60" : "🙈 EMA 60"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
                   <div style={{ flex: 1, position: "relative" }}>
                     <div ref={chartContainerRef} style={{ position: "absolute", width: "100%", height: "100%" }} />
                   </div>
