@@ -2,11 +2,11 @@ import React, { useEffect, useState, useRef } from "react";
 import { 
   ResponsiveContainer, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis
 } from 'recharts';
-import { createChart } from 'lightweight-charts'; // ✅ 引入 K線圖表庫
+import { createChart } from 'lightweight-charts';
 
 // ⚠️ API 網址設定：目前預設使用你的 Render 後端。若在本地端測試請改為 http://127.0.0.1:8000
 const API_BASE = "https://stock-backend-g011.onrender.com"; 
-const USERNAME = 'QuantUser'; // 模擬登入使用者
+const USERNAME = 'QuantUser'; 
 
 function apiUrl(path) {
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
@@ -15,10 +15,11 @@ function apiUrl(path) {
 
 export default function App() {
   // --- 狀態管理 ---
-  const [activeTab, setActiveTab] = useState('analyze'); // 分頁狀態
+  const [activeTab, setActiveTab] = useState('analyze'); 
   const [symbol, setSymbol] = useState("2330.TW");
   const [principal, setPrincipal] = useState(100000);
   const [duration, setDuration] = useState("mid");
+  const [timeInterval, setTimeInterval] = useState("1d"); // ✅ 新增：K線週期狀態
   
   const [analysisResult, setAnalysisResult] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -27,7 +28,6 @@ export default function App() {
   const [newsLoading, setNewsLoading] = useState(false);
   const [newsSearchInput, setNewsSearchInput] = useState(""); 
 
-  // 回測與投資組合狀態
   const [backtestResult, setBacktestResult] = useState(null);
   const [backtesting, setBacktesting] = useState(false);
   const [portfolio, setPortfolio] = useState(null);
@@ -36,7 +36,7 @@ export default function App() {
   const [portCost, setPortCost] = useState('');
 
   const currentQueryRef = useRef("全球市場 財經");
-  const chartContainerRef = useRef(null); // ✅ 新增：用來綁定 K 線圖容器
+  const chartContainerRef = useRef(null); 
 
   // --- 1️⃣ 模擬投報計算邏輯 ---
   const calculateROI = () => {
@@ -55,7 +55,7 @@ export default function App() {
 
   const roiData = calculateROI();
 
-  // --- 2️⃣ 新聞抓取邏輯 (完全保留你的版本) ---
+  // --- 2️⃣ 新聞抓取邏輯 ---
   async function fetchNews(query) {
     const searchQuery = query || "全球市場 財經";
     currentQueryRef.current = searchQuery;
@@ -95,7 +95,8 @@ export default function App() {
         body: JSON.stringify({ 
           symbol: targetSymbol, 
           principal: Number(principal),
-          duration: duration 
+          duration: duration,
+          interval: timeInterval // ✅ 新增：將週期參數傳給後端
         }),
       });
       
@@ -165,14 +166,12 @@ export default function App() {
     }
   };
 
-  // ✅ K線圖生成邏輯：當分析資料更新時，繪製 Lightweight Charts
+  // ✅ K線圖與指標生成邏輯
   useEffect(() => {
     if (activeTab !== 'analyze' || !analysisResult || !chartContainerRef.current) return;
 
-    // 清空舊圖表（避免重複渲染）
     chartContainerRef.current.innerHTML = "";
 
-    // 建立圖表實例
     const chart = createChart(chartContainerRef.current, {
       layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#334155' },
       grid: {
@@ -180,51 +179,70 @@ export default function App() {
         horzLines: { color: '#f1f5f9' },
       },
       timeScale: {
-        timeVisible: true,        // 顯示詳細時間
+        timeVisible: true,        
         borderColor: '#cbd5e1',
-        rightOffset: 12,          // 右側預留空間
-        barSpacing: 10,           // K線間距
+        rightOffset: 12,          
+        barSpacing: 10,            
       },
-      crosshair: {
-        mode: 1, // 十字準線啟用
-      },
-      rightPriceScale: {
-        borderColor: '#cbd5e1',
-      }
+      crosshair: { mode: 1 },
+      rightPriceScale: { borderColor: '#cbd5e1' }
     });
 
-    // 設定紅綠 K 線系列
+    // 設定 K 線
     const candlestickSeries = chart.addCandlestickSeries({
-      upColor: '#ef4444',        // 台股習慣：紅漲
-      downColor: '#22c55e',      // 台股習慣：綠跌
+      upColor: '#ef4444',        
+      downColor: '#22c55e',      
       borderVisible: false,
       wickUpColor: '#ef4444',
       wickDownColor: '#22c55e',
     });
 
-    // 設定預測 AI 折線系列 (蒙地卡羅漫步)
-    const predictionLineSeries = chart.addLineSeries({
-      color: '#3b82f6',          // 藍色折線
+    // ✅ 新增：SMA 20 指標線
+    const smaSeries = chart.addLineSeries({
+      color: '#f59e0b',          // 橘色代表 SMA20
       lineWidth: 2,
-      lineStyle: 2,              // 虛線樣式代表預測
+      title: 'SMA20'
+    });
+
+    // ✅ 新增：EMA 60 指標線
+    const emaSeries = chart.addLineSeries({
+      color: '#8b5cf6',          // 紫色代表 EMA60
+      lineWidth: 2,
+      title: 'EMA60'
+    });
+
+    // 設定預測 AI 折線
+    const predictionLineSeries = chart.addLineSeries({
+      color: '#3b82f6',          
+      lineWidth: 2,
+      lineStyle: 2,              
+      title: 'AI 預測漫步'
     });
 
     const chartData = analysisResult.chart_data;
     if (chartData && chartData.history) {
-      // 由於你的 API 可能只回傳收盤價 (price)，這裡我們動態模擬開高低收 (OHLC) 讓圖表豐富
-      const ohlcData = chartData.history.map((item, index, arr) => {
-        const close = item.price;
-        const open = index === 0 ? close * 0.995 : arr[index - 1].price; 
-        const volatility = Math.abs(open - close) * 0.5;
-        return {
-          time: item.date, // 需為 YYYY-MM-DD 格式
-          open: open,
-          high: Math.max(open, close) + volatility,
-          low: Math.min(open, close) - volatility,
-          close: close,
-        };
-      });
+      // ✅ 配合後端傳回的真實 OHLC 與指標資料
+      const ohlcData = chartData.history.map(item => ({
+        time: item.date,
+        open: item.open,
+        high: item.high,
+        low: item.low,
+        close: item.close,
+      }));
       candlestickSeries.setData(ohlcData);
+
+      // ✅ 綁定 SMA 與 EMA 資料
+      const smaData = chartData.history.filter(item => item.sma20 !== null).map(item => ({
+        time: item.date,
+        value: item.sma20
+      }));
+      const emaData = chartData.history.filter(item => item.ema60 !== null).map(item => ({
+        time: item.date,
+        value: item.ema60
+      }));
+      
+      smaSeries.setData(smaData);
+      emaSeries.setData(emaData);
     }
 
     if (chartData && chartData.prediction) {
@@ -235,10 +253,8 @@ export default function App() {
       predictionLineSeries.setData(lineData);
     }
 
-    // 自動縮放以適應視窗
     chart.timeScale().fitContent();
 
-    // 處理視窗大小改變時的 RWD
     const handleResize = () => {
       if (chartContainerRef.current) {
         chart.applyOptions({ width: chartContainerRef.current.clientWidth });
@@ -300,9 +316,6 @@ export default function App() {
         <button style={tabButtonStyle('portfolio')} onClick={() => setActiveTab('portfolio')}>💼 投資組合管理</button>
       </div>
 
-      {/* ========================================== */}
-      {/* Tab 1: AI 分析與預測 */}
-      {/* ========================================== */}
       {activeTab === 'analyze' && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px", animation: "fadeIn 0.5s ease-in-out" }}>
           {/* 左側：參數與新聞 */}
@@ -313,6 +326,28 @@ export default function App() {
                 <label style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>標的代碼 (Yahoo Finance 格式)</label>
                 <input style={{...inputStyle, textTransform: "uppercase"}} value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="例如: 2330.TW" />
               </div>
+              
+              {/* ✅ 新增：K 線週期選單 */}
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>K 線分析週期</label>
+                <div style={{ display: "flex", gap: "5px", marginTop: "5px" }}>
+                  {["1d", "1wk", "1mo"].map(inv => (
+                    <button 
+                      key={inv} type="button" 
+                      onClick={() => setTimeInterval(inv)}
+                      style={{
+                        flex: 1, padding: "8px", border: "1px solid #cbd5e1", borderRadius: "6px",
+                        background: timeInterval === inv ? "#3b82f6" : "white",
+                        color: timeInterval === inv ? "white" : "#475569",
+                        cursor: "pointer", fontWeight: "bold", transition: "all 0.2s"
+                      }}
+                    >
+                      {inv === "1d" ? "日線" : inv === "1wk" ? "週線" : "月線"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div style={{ marginBottom: "15px" }}>
                 <label style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>預計持有期限</label>
                 <select style={inputStyle} value={duration} onChange={(e) => setDuration(e.target.value)}>
@@ -441,10 +476,9 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* ✅ 新增：K線圖與詳細時間線容器 */}
                 <div style={{ background: "white", padding: "24px", borderRadius: "12px", height: "450px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", display: "flex", flexDirection: "column" }}>
                   <h3 style={{ margin: "0 0 10px 0", color: "#0f172a", display: "flex", justifyContent: "space-between" }}>
-                    <span>📈 歷史 K 線與預測漫步</span>
+                    <span>📈 歷史 K 線、趨勢線 (SMA20/EMA60) 與預測</span>
                     <span style={{fontSize:"13px", color:"#64748b", fontWeight:"normal"}}>✅ 支援滑鼠滾輪縮放與拖曳平移</span>
                   </h3>
                   <div style={{ flex: 1, position: "relative" }}>
@@ -458,7 +492,7 @@ export default function App() {
       )}
 
       {/* ========================================== */}
-      {/* Tab 2: 歷史回測檢驗 (無變動) */}
+      {/* Tab 2: 歷史回測檢驗 */}
       {/* ========================================== */}
       {activeTab === 'backtest' && (
         <div style={{ maxWidth: "800px", margin: "0 auto", animation: "fadeIn 0.5s ease-in-out" }}>
@@ -511,7 +545,7 @@ export default function App() {
       )}
 
       {/* ========================================== */}
-      {/* Tab 3: 投資組合管理 (無變動) */}
+      {/* Tab 3: 投資組合管理 */}
       {/* ========================================== */}
       {activeTab === 'portfolio' && (
         <div style={{ animation: "fadeIn 0.5s ease-in-out" }}>
