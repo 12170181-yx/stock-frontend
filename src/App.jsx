@@ -45,12 +45,16 @@ export default function App() {
 
   // --- 1️⃣ 模擬投報計算邏輯 ---
   const calculateROI = () => {
-    if (!analysisResult || !analysisResult.chart_data?.prediction) return null;
+    // 🛡️ 防呆：確保所有必要的子物件與陣列都存在才計算
+    if (!analysisResult || !analysisResult.advice?.buy_price || !analysisResult.chart_data?.prediction?.length) return null;
     
     const buyPrice = analysisResult.advice.buy_price;
     const predictionData = analysisResult.chart_data.prediction;
-    const targetPrice = predictionData[predictionData.length - 1].mid;
+    const targetPrice = predictionData[predictionData.length - 1]?.mid || buyPrice;
     
+    // 避免除以 0
+    if (!buyPrice || buyPrice <= 0) return null;
+
     const shares = Math.floor(principal / buyPrice);
     const expectedProfit = Math.round(shares * (targetPrice - buyPrice));
     const roiPercentage = (((targetPrice - buyPrice) / buyPrice) * 100).toFixed(2);
@@ -69,7 +73,7 @@ export default function App() {
       const res = await fetch(apiUrl(`/api/news/search/?q=${encodeURIComponent(searchQuery)}&is_tw=true`));
       if (res.ok) {
         const data = await res.json();
-        setNewsList(data.news || []);
+        setNewsList(Array.isArray(data.news) ? data.news : []);
       }
     } catch (err) {
       console.error("新聞抓取失敗:", err);
@@ -105,7 +109,7 @@ export default function App() {
       });
       
       if (!res.ok) {
-        const errData = await res.json();
+        const errData = await res.json().catch(() => ({}));
         throw new Error(errData.detail || "分析失敗");
       }
       
@@ -174,6 +178,7 @@ export default function App() {
   useEffect(() => {
     if (activeTab !== 'analyze' || !analysisResult || !chartContainerRef.current) return;
 
+    // 清空舊圖表容器，避免重複渲染
     chartContainerRef.current.innerHTML = "";
 
     const chart = createChart(chartContainerRef.current, {
@@ -201,8 +206,14 @@ export default function App() {
     });
 
     const chartData = analysisResult.chart_data;
-    if (chartData && chartData.history) {
-      const ohlcData = chartData.history.map(item => ({
+    
+    // 🛡️ 防呆：確保歷史資料為陣列
+    if (chartData && Array.isArray(chartData.history) && chartData.history.length > 0) {
+      
+      // ⚠️ 關鍵修正：lightweight-charts 必須確保時間序列是由舊到新（升序）
+      const sortedHistory = [...chartData.history].sort((a, b) => new Date(a.date) - new Date(b.date));
+      
+      const ohlcData = sortedHistory.map(item => ({
         time: item.date,
         open: item.open,
         high: item.high,
@@ -212,31 +223,29 @@ export default function App() {
       candlestickSeries.setData(ohlcData);
 
       if (showSMA) {
-        const smaSeries = chart.addLineSeries({
-          color: '#f59e0b', lineWidth: 2, title: 'SMA20'
-        });
-        const smaData = chartData.history.filter(item => item.sma20 !== null).map(item => ({
-          time: item.date, value: item.sma20
-        }));
-        smaSeries.setData(smaData);
+        const smaSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 2, title: 'SMA20' });
+        const smaData = sortedHistory
+          .filter(item => item.sma20 !== null && item.sma20 !== undefined)
+          .map(item => ({ time: item.date, value: item.sma20 }));
+        if (smaData.length > 0) smaSeries.setData(smaData);
       }
 
       if (showEMA) {
-        const emaSeries = chart.addLineSeries({
-          color: '#8b5cf6', lineWidth: 2, title: 'EMA60'
-        });
-        const emaData = chartData.history.filter(item => item.ema60 !== null).map(item => ({
-          time: item.date, value: item.ema60
-        }));
-        emaSeries.setData(emaData);
+        const emaSeries = chart.addLineSeries({ color: '#8b5cf6', lineWidth: 2, title: 'EMA60' });
+        const emaData = sortedHistory
+          .filter(item => item.ema60 !== null && item.ema60 !== undefined)
+          .map(item => ({ time: item.date, value: item.ema60 }));
+        if (emaData.length > 0) emaSeries.setData(emaData);
       }
     }
 
-    if (chartData && chartData.prediction) {
+    // 🛡️ 確保預測資料為陣列並排序
+    if (chartData && Array.isArray(chartData.prediction) && chartData.prediction.length > 0) {
       const predictionLineSeries = chart.addLineSeries({
         color: '#3b82f6', lineWidth: 2, lineStyle: 2, title: 'AI 預測'
       });
-      const lineData = chartData.prediction.map(item => ({
+      const sortedPrediction = [...chartData.prediction].sort((a, b) => new Date(a.date) - new Date(b.date));
+      const lineData = sortedPrediction.map(item => ({
         time: item.date, value: item.mid,
       }));
       predictionLineSeries.setData(lineData);
@@ -404,15 +413,15 @@ export default function App() {
                     <div style={{ marginTop: "20px", padding: "15px", background: "#eff6ff", borderRadius: "8px", textAlign: "left", border: "1px solid #bfdbfe" }}>
                       <div style={{ marginBottom: "8px", display: "flex", justifyContent: "space-between" }}>
                         <span style={{ color: "#475569", fontWeight: "bold", fontSize: "14px" }}>💡 建議進場價</span>
-                        <span style={{ color: "#059669", fontWeight: "bold", fontSize: "15px" }}>${analysisResult.advice?.buy_price?.toLocaleString()}</span>
+                        <span style={{ color: "#059669", fontWeight: "bold", fontSize: "15px" }}>${analysisResult.advice?.buy_price?.toLocaleString() || '-'}</span>
                       </div>
                       <div style={{ marginBottom: "8px", display: "flex", justifyContent: "space-between" }}>
                         <span style={{ color: "#475569", fontWeight: "bold", fontSize: "14px" }}>🚀 目標獲利價</span>
-                        <span style={{ color: "#2563eb", fontWeight: "bold", fontSize: "15px" }}>${analysisResult.advice?.take_profit?.toLocaleString()}</span>
+                        <span style={{ color: "#2563eb", fontWeight: "bold", fontSize: "15px" }}>${analysisResult.advice?.take_profit?.toLocaleString() || '-'}</span>
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
                         <span style={{ color: "#475569", fontWeight: "bold", fontSize: "14px" }}>🛡️ 動態停損價</span>
-                        <span style={{ color: "#dc2626", fontWeight: "bold", fontSize: "15px" }}>${(analysisResult.quant_metrics?.stop_loss_suggested || analysisResult.advice?.stop_loss)?.toLocaleString()}</span>
+                        <span style={{ color: "#dc2626", fontWeight: "bold", fontSize: "15px" }}>${(analysisResult.quant_metrics?.stop_loss_suggested || analysisResult.advice?.stop_loss)?.toLocaleString() || '-'}</span>
                       </div>
                     </div>
 
@@ -420,12 +429,12 @@ export default function App() {
                       <div style={{ fontSize: "13px", fontWeight: "bold", color: "#334155", marginBottom: "8px" }}>💰 模擬持倉期滿預估</div>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>
                         <span>預估購買股數</span>
-                        <span>{roiData?.shares.toLocaleString()} 股</span>
+                        <span>{roiData?.shares?.toLocaleString() || 0} 股</span>
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px", paddingTop: "8px", borderTop: "1px dashed #cbd5e1" }}>
                         <span style={{ fontWeight: "bold", color: "#334155" }}>預期損益</span>
-                        <span style={{ fontWeight: "bold", color: roiData?.expectedProfit >= 0 ? "#16a34a" : "#dc2626" }}>
-                          {roiData?.expectedProfit >= 0 ? "+" : ""}{roiData?.expectedProfit.toLocaleString()} TWD ({roiData?.roiPercentage}%)
+                        <span style={{ fontWeight: "bold", color: (roiData?.expectedProfit || 0) >= 0 ? "#16a34a" : "#dc2626" }}>
+                          {(roiData?.expectedProfit || 0) >= 0 ? "+" : ""}{(roiData?.expectedProfit || 0).toLocaleString()} TWD ({roiData?.roiPercentage || 0}%)
                         </span>
                       </div>
                     </div>
@@ -484,7 +493,7 @@ export default function App() {
                               {key === 'trend' ? '📈 趨勢因子權重' : key === 'momentum' ? '⚡ 動能因子權重' : '🌪️ 波動因子權重'}
                             </div>
                             <div style={{ fontWeight: "900", color: "#0f172a", fontSize: "18px" }}>
-                              {(val * 100).toFixed(1)}%
+                              {((val || 0) * 100).toFixed(1)}%
                             </div>
                           </div>
                         ))}
@@ -590,179 +599,179 @@ export default function App() {
                   <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
                     <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>策略累積報酬</div>
                     <div style={{ fontSize: "32px", fontWeight: "900", color: backtestResult.backtest_3yr?.cumulative_return_pct >= 0 ? "#ef4444" : "#22c55e", margin: "10px 0" }}>
-                      {backtestResult.backtest_3yr?.cumulative_return_pct}%
+                      {backtestResult.backtest_3yr?.cumulative_return_pct || 0}%
                     </div>
-                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>買入持有基準: {backtestResult.backtest_3yr?.buy_and_hold_return_pct}%</div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>買入持有基準: {backtestResult.backtest_3yr?.buy_and_hold_return_pct || 0}%</div>
                   </div>
                   <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
                     <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>勝率 (Win Rate)</div>
                     <div style={{ fontSize: "32px", fontWeight: "900", color: "#3b82f6", margin: "10px 0" }}>
-                      {backtestResult.backtest_3yr?.win_rate_pct}%
+                      {backtestResult.backtest_3yr?.win_rate_pct || 0}%
                     </div>
                   </div>
                   <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
                     <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>夏普值 (Sharpe Ratio)</div>
                     <div style={{ fontSize: "32px", fontWeight: "900", color: "#9333ea", margin: "10px 0" }}>
-                      {backtestResult.backtest_3yr?.sharpe_ratio}
+                      {backtestResult.backtest_3yr?.sharpe_ratio || 0}
                     </div>
                     <div style={{ fontSize: "12px", color: "#94a3b8" }}>&gt; 1 代表風險報酬比優異</div>
                   </div>
                   <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
                     <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>最大回撤 (MDD)</div>
                     <div style={{ fontSize: "32px", fontWeight: "900", color: "#22c55e", margin: "10px 0" }}>
-                     -{backtestResult.backtest_3yr?.max_drawdown_pct}%
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>歷史最大虧損幅度</div>
-                  </div>
-                </div>
+                      -{backtestResult.backtest_3yr?.max_drawdown_pct || 0}%
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>歷史最大虧損幅度</div>
+                  </div>
+                </div>
 
-                {/* ✅ 新增：高階量化指標 (CAGR, Sortino, Calmar) */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "20px", textAlign: "left", marginTop: "20px" }}>
-                  <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-                    <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>年化報酬 (CAGR)</div>
-                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#f59e0b", margin: "10px 0" }}>
-                      {backtestResult.backtest_3yr?.cagr || '18.4'}%
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>複合年均成長率</div>
-                  </div>
-                  <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-                    <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>索提諾 (Sortino)</div>
-                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#06b6d4", margin: "10px 0" }}>
-                      {backtestResult.backtest_3yr?.sortino_ratio || '1.52'}
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>下行風險報酬比</div>
-                  </div>
-                  <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-                    <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>卡瑪 (Calmar)</div>
-                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#ec4899", margin: "10px 0" }}>
-                      {backtestResult.backtest_3yr?.calmar_ratio || '1.12'}
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>報酬 / 最大回撤比</div>
-                  </div>
-                </div>
+                {/* ✅ 新增：高階量化指標 (CAGR, Sortino, Calmar) */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "20px", textAlign: "left", marginTop: "20px" }}>
+                  <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>年化報酬 (CAGR)</div>
+                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#f59e0b", margin: "10px 0" }}>
+                      {backtestResult.backtest_3yr?.cagr || '0.0'}%
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>複合年均成長率</div>
+                  </div>
+                  <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>索提諾 (Sortino)</div>
+                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#06b6d4", margin: "10px 0" }}>
+                      {backtestResult.backtest_3yr?.sortino_ratio || '0.00'}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>下行風險報酬比</div>
+                  </div>
+                  <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>卡瑪 (Calmar)</div>
+                    <div style={{ fontSize: "32px", fontWeight: "900", color: "#ec4899", margin: "10px 0" }}>
+                      {backtestResult.backtest_3yr?.calmar_ratio || '0.00'}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8" }}>報酬 / 最大回撤比</div>
+                  </div>
+                </div>
 
-                {/* ===== 🛡️ 新增：模型穩健性檢驗 (Robustness) ===== */}
-                {backtestResult.robustness && (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "20px", textAlign: "left", marginTop: "20px" }}>
-                    <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-                      <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>樣本外測試報酬</div>
-                      <div style={{ fontSize: "32px", fontWeight: "900", color: backtestResult.robustness.out_of_sample_return_pct >= 0 ? "#ef4444" : "#22c55e", margin: "10px 0" }}>
-                        {backtestResult.robustness.out_of_sample_return_pct}%
-                      </div>
-                      <div style={{ fontSize: "12px", color: "#94a3b8" }}>最新一季未參與訓練數據</div>
-                    </div>
-                    <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-                      <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>過擬合風險 (Overfit Risk)</div>
-                      <div style={{ fontSize: "32px", fontWeight: "900", color: backtestResult.robustness.overfit_risk === '低' ? "#22c55e" : backtestResult.robustness.overfit_risk === '中' ? "#f59e0b" : "#ef4444", margin: "10px 0" }}>
-                        {backtestResult.robustness.overfit_risk}
-                      </div>
-                      <div style={{ fontSize: "12px", color: "#94a3b8" }}>訓練 vs 樣本外表現差異</div>
-                    </div>
-                    <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-                      <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>體制抗性評分 (Resilience)</div>
-                      <div style={{ fontSize: "32px", fontWeight: "900", color: "#8b5cf6", margin: "10px 0" }}>
-                        {backtestResult.robustness.regime_resilience_score}
-                      </div>
-                      <div style={{ fontSize: "12px", color: "#94a3b8" }}>多空市場切換的穩定度 (0-100)</div>
-                    </div>
-                  </div>
-                )}
-                {/* ========================================= */}
+                {/* ===== 🛡️ 新增：模型穩健性檢驗 (Robustness) ===== */}
+                {backtestResult.robustness && (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "20px", textAlign: "left", marginTop: "20px" }}>
+                    <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                      <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>樣本外測試報酬</div>
+                      <div style={{ fontSize: "32px", fontWeight: "900", color: backtestResult.robustness.out_of_sample_return_pct >= 0 ? "#ef4444" : "#22c55e", margin: "10px 0" }}>
+                        {backtestResult.robustness.out_of_sample_return_pct || 0}%
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#94a3b8" }}>最新一季未參與訓練數據</div>
+                    </div>
+                    <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                      <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>過擬合風險 (Overfit Risk)</div>
+                      <div style={{ fontSize: "32px", fontWeight: "900", color: backtestResult.robustness.overfit_risk === '低' ? "#22c55e" : backtestResult.robustness.overfit_risk === '中' ? "#f59e0b" : "#ef4444", margin: "10px 0" }}>
+                        {backtestResult.robustness.overfit_risk || '-'}
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#94a3b8" }}>訓練 vs 樣本外表現差異</div>
+                    </div>
+                    <div style={{ padding: "20px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                      <div style={{ color: "#64748b", fontSize: "14px", fontWeight: "bold" }}>體制抗性評分 (Resilience)</div>
+                      <div style={{ fontSize: "32px", fontWeight: "900", color: "#8b5cf6", margin: "10px 0" }}>
+                        {backtestResult.robustness.regime_resilience_score || 0}
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#94a3b8" }}>多空市場切換的穩定度 (0-100)</div>
+                    </div>
+                  </div>
+                )}
+                {/* ========================================= */}
 
-                {/* ✅ 新增：步進測試歷年績效長條圖 */}
-                <div style={{ background: "#f8fafc", padding: "20px", borderRadius: "12px", border: "1px solid #e2e8f0", marginTop: "20px", textAlign: "left" }}>
-                  <h4 style={{ margin: "0 0 20px 0", color: "#475569" }}>📊 步進測試 (Walk-forward)：歷年策略績效</h4>
-                  <div style={{ width: '100%', height: 300 }}>
-                    <ResponsiveContainer>
-                      <BarChart data={backtestResult.backtest_3yr?.yearly_data || [
-                        { year: '2023', return: 22.5 }, { year: '2024', return: 15.8 }, { year: '2025', return: -4.2 }, { year: '2026', return: 10.5 }
-                      ]}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="year" axisLine={false} tickLine={false} />
-                        <YAxis axisLine={false} tickLine={false} unit="%" />
-                        <Tooltip cursor={{fill: '#edf2f7'}} contentStyle={{ borderRadius: '8px', border: 'none' }} />
-                        <Bar dataKey="return" radius={[4, 4, 0, 0]}>
-                          {(backtestResult.backtest_3yr?.yearly_data || [
-                            { year: '2023', return: 22.5 }, { year: '2024', return: 15.8 }, { year: '2025', return: -4.2 }, { year: '2026', return: 10.5 }
-                          ]).map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.return >= 0 ? '#ef4444' : '#22c55e'} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+                {/* ✅ 新增：步進測試歷年績效長條圖 */}
+                <div style={{ background: "#f8fafc", padding: "20px", borderRadius: "12px", border: "1px solid #e2e8f0", marginTop: "20px", textAlign: "left" }}>
+                  <h4 style={{ margin: "0 0 20px 0", color: "#475569" }}>📊 步進測試 (Walk-forward)：歷年策略績效</h4>
+                  <div style={{ width: '100%', height: 300 }}>
+                    <ResponsiveContainer>
+                      <BarChart data={backtestResult.backtest_3yr?.yearly_data || [
+                        { year: '2023', return: 22.5 }, { year: '2024', return: 15.8 }, { year: '2025', return: -4.2 }, { year: '2026', return: 10.5 }
+                      ]}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="year" axisLine={false} tickLine={false} />
+                        <YAxis axisLine={false} tickLine={false} unit="%" />
+                        <Tooltip cursor={{fill: '#edf2f7'}} contentStyle={{ borderRadius: '8px', border: 'none' }} />
+                        <Bar dataKey="return" radius={[4, 4, 0, 0]}>
+                          {(backtestResult.backtest_3yr?.yearly_data || [
+                            { year: '2023', return: 22.5 }, { year: '2024', return: 15.8 }, { year: '2025', return: -4.2 }, { year: '2026', return: 10.5 }
+                          ]).map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.return >= 0 ? '#ef4444' : '#22c55e'} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
-      {/* ========================================== */}
-      {/* Tab 3: 投資組合管理 */}
-      {/* ========================================== */}
-      {activeTab === 'portfolio' && (
-        <div style={{ animation: "fadeIn 0.5s ease-in-out" }}>
-          <form onSubmit={handleAddPortfolio} style={{ background: "white", padding: "24px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", display: "flex", gap: "15px", alignItems: "flex-end", marginBottom: "20px", flexWrap: "wrap" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "12px", fontWeight: "bold", color: "#475569", marginBottom: "5px" }}>股票代碼</label>
-              <input required value={portSymbol} onChange={(e)=>setPortSymbol(e.target.value)} style={{...inputStyle, width: "150px", marginTop: 0, textTransform: "uppercase"}} placeholder="2330.TW"/>
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: "12px", fontWeight: "bold", color: "#475569", marginBottom: "5px" }}>持有股數</label>
-              <input required type="number" step="0.01" value={portShares} onChange={(e)=>setPortShares(e.target.value)} style={{...inputStyle, width: "150px", marginTop: 0}} placeholder="1000"/>
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: "12px", fontWeight: "bold", color: "#475569", marginBottom: "5px" }}>平均成本</label>
-              <input required type="number" step="0.01" value={portCost} onChange={(e)=>setPortCost(e.target.value)} style={{...inputStyle, width: "150px", marginTop: 0}} placeholder="800"/>
-            </div>
-            <button type="submit" style={{ padding: "12px 24px", background: "#16a34a", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", height: "42px" }}>
-              新增 / 更新部位
-            </button>
-          </form>
+      {/* ========================================== */}
+      {/* Tab 3: 投資組合管理 */}
+      {/* ========================================== */}
+      {activeTab === 'portfolio' && (
+        <div style={{ animation: "fadeIn 0.5s ease-in-out" }}>
+          <form onSubmit={handleAddPortfolio} style={{ background: "white", padding: "24px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", display: "flex", gap: "15px", alignItems: "flex-end", marginBottom: "20px", flexWrap: "wrap" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: "bold", color: "#475569", marginBottom: "5px" }}>股票代碼</label>
+              <input required value={portSymbol} onChange={(e)=>setPortSymbol(e.target.value)} style={{...inputStyle, width: "150px", marginTop: 0, textTransform: "uppercase"}} placeholder="2330.TW"/>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: "bold", color: "#475569", marginBottom: "5px" }}>持有股數</label>
+              <input required type="number" step="0.01" value={portShares} onChange={(e)=>setPortShares(e.target.value)} style={{...inputStyle, width: "150px", marginTop: 0}} placeholder="1000"/>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: "bold", color: "#475569", marginBottom: "5px" }}>平均成本</label>
+              <input required type="number" step="0.01" value={portCost} onChange={(e)=>setPortCost(e.target.value)} style={{...inputStyle, width: "150px", marginTop: 0}} placeholder="800"/>
+            </div>
+            <button type="submit" style={{ padding: "12px 24px", background: "#16a34a", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", height: "42px" }}>
+              新增 / 更新部位
+            </button>
+          </form>
 
-          {portfolio && (
-            <div style={{ background: "white", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", overflow: "hidden" }}>
-              <div style={{ padding: "20px 24px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h3 style={{ margin: 0, color: "#0f172a" }}>總市值: ${portfolio.summary?.total_market_value?.toLocaleString()}</h3>
-                <div style={{ fontSize: "16px", fontWeight: "bold", color: portfolio.summary?.total_return_pct >= 0 ? "#ef4444" : "#22c55e" }}>
-                  總損益: {portfolio.summary?.total_unrealized_pl > 0 ? '+' : ''}{portfolio.summary?.total_unrealized_pl?.toLocaleString()} ({portfolio.summary?.total_return_pct}%)
-                </div>
-              </div>
-              
-              <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
-                <thead style={{ background: "#f1f5f9", fontSize: "13px", color: "#475569" }}>
-                  <tr>
-                    <th style={{ padding: "16px 24px" }}>代碼</th>
-                    <th style={{ padding: "16px 24px" }}>股數</th>
-                    <th style={{ padding: "16px 24px" }}>平均成本</th>
-                    <th style={{ padding: "16px 24px" }}>現價</th>
-                    <th style={{ padding: "16px 24px", textAlign: "right" }}>市值</th>
-                    <th style={{ padding: "16px 24px", textAlign: "right" }}>未實現損益</th>
-                  </tr>
-                </thead>
-                <tbody style={{ fontSize: "14px", color: "#1e293b" }}>
-                  {(portfolio.positions || []).map((pos) => (
-                    <tr key={pos.symbol} style={{ borderBottom: "1px solid #e2e8f0" }}>
-                      <td style={{ padding: "16px 24px", fontWeight: "bold" }}>{pos.symbol}</td>
-                      <td style={{ padding: "16px 24px" }}>{pos.shares}</td>
-                      <td style={{ padding: "16px 24px" }}>${pos.avg_cost}</td>
-                      <td style={{ padding: "16px 24px" }}>${pos.current_price}</td>
-                      <td style={{ padding: "16px 24px", textAlign: "right", fontWeight: "600" }}>${pos.market_value?.toLocaleString()}</td>
-                      <td style={{ padding: "16px 24px", textAlign: "right", fontWeight: "bold", color: pos.unrealized_pl_pct >= 0 ? "#ef4444" : "#22c55e" }}>
-                        {pos.unrealized_pl > 0 ? '+' : ''}{pos.unrealized_pl} ({pos.unrealized_pl_pct}%)
-                      </td>
-                    </tr>
-                  ))}
-                  {(!portfolio.positions || portfolio.positions.length === 0) && (
-                    <tr><td colSpan="6" style={{ padding: "30px", textAlign: "center", color: "#94a3b8" }}>目前沒有持股，請從上方新增。</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
+          {portfolio && (
+            <div style={{ background: "white", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", overflow: "hidden" }}>
+              <div style={{ padding: "20px 24px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h3 style={{ margin: 0, color: "#0f172a" }}>總市值: ${portfolio.summary?.total_market_value?.toLocaleString() || 0}</h3>
+                <div style={{ fontSize: "16px", fontWeight: "bold", color: (portfolio.summary?.total_return_pct || 0) >= 0 ? "#ef4444" : "#22c55e" }}>
+                  總損益: {(portfolio.summary?.total_unrealized_pl || 0) > 0 ? '+' : ''}{portfolio.summary?.total_unrealized_pl?.toLocaleString() || 0} ({portfolio.summary?.total_return_pct || 0}%)
+                </div>
+              </div>
+              
+              <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+                <thead style={{ background: "#f1f5f9", fontSize: "13px", color: "#475569" }}>
+                  <tr>
+                    <th style={{ padding: "16px 24px" }}>代碼</th>
+                    <th style={{ padding: "16px 24px" }}>股數</th>
+                    <th style={{ padding: "16px 24px" }}>平均成本</th>
+                    <th style={{ padding: "16px 24px" }}>現價</th>
+                    <th style={{ padding: "16px 24px", textAlign: "right" }}>市值</th>
+                    <th style={{ padding: "16px 24px", textAlign: "right" }}>未實現損益</th>
+                  </tr>
+                </thead>
+                <tbody style={{ fontSize: "14px", color: "#1e293b" }}>
+                  {(portfolio.positions || []).map((pos) => (
+                    <tr key={pos.symbol} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                      <td style={{ padding: "16px 24px", fontWeight: "bold" }}>{pos.symbol}</td>
+                      <td style={{ padding: "16px 24px" }}>{pos.shares}</td>
+                      <td style={{ padding: "16px 24px" }}>${pos.avg_cost}</td>
+                      <td style={{ padding: "16px 24px" }}>${pos.current_price}</td>
+                      <td style={{ padding: "16px 24px", textAlign: "right", fontWeight: "600" }}>${pos.market_value?.toLocaleString() || 0}</td>
+                      <td style={{ padding: "16px 24px", textAlign: "right", fontWeight: "bold", color: pos.unrealized_pl_pct >= 0 ? "#ef4444" : "#22c55e" }}>
+                        {pos.unrealized_pl > 0 ? '+' : ''}{pos.unrealized_pl} ({pos.unrealized_pl_pct}%)
+                      </td>
+                    </tr>
+                  ))}
+                  {(!portfolio.positions || portfolio.positions.length === 0) && (
+                    <tr><td colSpan="6" style={{ padding: "30px", textAlign: "center", color: "#94a3b8" }}>目前沒有持股，請從上方新增。</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
