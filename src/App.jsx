@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { 
   ResponsiveContainer, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
-  BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell // ✅ 新增圖表所需組件
+  BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell
 } from 'recharts';
 import { createChart } from 'lightweight-charts';
 
@@ -22,7 +22,7 @@ export default function App() {
   const [duration, setDuration] = useState("mid");
   const [timeInterval, setTimeInterval] = useState("1d"); 
   
-  // ✅ 新增：均線顯示狀態（預設 false，沒按不出現）
+  // ✅ 均線顯示狀態（預設 false，沒按不出現）
   const [showSMA, setShowSMA] = useState(false);
   const [showEMA, setShowEMA] = useState(false);
 
@@ -443,6 +443,56 @@ export default function App() {
                     </ResponsiveContainer>
                   </div>
                 </div>
+
+                {/* ===== 🤖 新增：機器學習次日預測面板 ===== */}
+                {analysisResult.ml_prediction && (
+                  <div style={{ background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", display: "flex", flexDirection: "column", gap: "15px", animation: "fadeIn 0.6s ease-in-out" }}>
+                    <h3 style={{ margin: 0, color: "#0f172a", fontSize: "16px", borderBottom: "1px solid #e2e8f0", paddingBottom: "10px", display: "flex", alignItems: "center", gap: "8px" }}>
+                      🤖 機器學習次日預測 <span style={{ fontSize: "12px", background: "#eff6ff", color: "#2563eb", padding: "2px 8px", borderRadius: "12px", fontWeight: "normal" }}>XGBoost 決策引擎</span>
+                    </h3>
+                    
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "20px", alignItems: "center" }}>
+                      {/* 上漲機率進度條 */}
+                      <div style={{ flex: "1 1 250px", background: "#f8fafc", padding: "15px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        <div style={{ fontSize: "13px", color: "#64748b", fontWeight: "bold", marginBottom: "8px", display: "flex", justifyContent: "space-between" }}>
+                          <span>預估明日上漲機率</span>
+                          <span style={{ color: analysisResult.ml_prediction.upward_probability_pct >= 50 ? "#ef4444" : "#22c55e", fontWeight: "bold" }}>
+                            {analysisResult.ml_prediction.upward_probability_pct >= 50 ? "多方優勢" : "空方優勢"}
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+                          <div style={{ flex: 1, height: "14px", background: "#cbd5e1", borderRadius: "8px", overflow: "hidden", position: "relative" }}>
+                            <div style={{ 
+                              width: `${analysisResult.ml_prediction.upward_probability_pct}%`, 
+                              height: "100%", 
+                              /* 配合台股：紅漲綠跌 */
+                              background: analysisResult.ml_prediction.upward_probability_pct >= 50 ? "linear-gradient(90deg, #f87171, #ef4444)" : "linear-gradient(90deg, #4ade80, #22c55e)", 
+                              transition: "width 1s cubic-bezier(0.4, 0, 0.2, 1)" 
+                            }}></div>
+                          </div>
+                          <span style={{ fontWeight: "900", fontSize: "24px", color: analysisResult.ml_prediction.upward_probability_pct >= 50 ? "#ef4444" : "#22c55e" }}>
+                            {analysisResult.ml_prediction.upward_probability_pct}%
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* 決策因子權重分布 */}
+                      <div style={{ flex: "2 1 300px", display: "flex", gap: "12px" }}>
+                        {Object.entries(analysisResult.ml_prediction.factors || {}).map(([key, val]) => (
+                          <div key={key} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", background: "white", padding: "12px", borderRadius: "8px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.02)", textAlign: "center" }}>
+                            <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "6px", fontWeight: "bold" }}>
+                              {key === 'trend' ? '📈 趨勢因子權重' : key === 'momentum' ? '⚡ 動能因子權重' : '🌪️ 波動因子權重'}
+                            </div>
+                            <div style={{ fontWeight: "900", color: "#0f172a", fontSize: "18px" }}>
+                              {(val * 100).toFixed(1)}%
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {/* ========================================== */}
 
                 <div style={{ background: "white", padding: "24px", borderRadius: "12px", height: "480px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", display: "flex", flexDirection: "column" }}>
                   
