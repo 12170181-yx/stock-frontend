@@ -489,8 +489,9 @@ export default function App() {
                       <div style={{ flex: "2 1 300px", display: "flex", gap: "12px" }}>
                         {Object.entries(analysisResult.ml_prediction.factors || {}).map(([key, val]) => (
                           <div key={key} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", background: "white", padding: "12px", borderRadius: "8px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.02)", textAlign: "center" }}>
+                            {/* ✅ 修復這裡的對應關係：加入安全對應與 fallback */}
                             <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "6px", fontWeight: "bold" }}>
-                              {key === 'trend' ? '📈 趨勢因子權重' : key === 'momentum' ? '⚡ 動能因子權重' : '🌪️ 波動因子權重'}
+                              {key === 'trend' ? '📈 趨勢動能' : key === 'momentum' ? '⚡ 超買超賣' : key === 'volatility' ? '🌪️ 波動風險' : key}
                             </div>
                             <div style={{ fontWeight: "900", color: "#0f172a", fontSize: "18px" }}>
                               {((val || 0) * 100).toFixed(1)}%
